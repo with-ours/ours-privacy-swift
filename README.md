@@ -1,10 +1,4 @@
 
-
-<p align="center">
-  <img src="https://user-images.githubusercontent.com/71290498/231855731-2d3774c3-dc41-4595-abfb-9c49f5f84103.png" alt="Mixpanel Swift Library" height="150"/>
-</p>
-
-
 [![Average time to resolve an issue](http://isitmaintained.com/badge/resolution/mixpanel/mixpanel-swift.svg)](http://isitmaintained.com/project/mixpanel/mixpanel-swift "Average time to resolve an issue")
 [![Percentage of issues still open](http://isitmaintained.com/badge/open/mixpanel/mixpanel-swift.svg)](http://isitmaintained.com/project/mixpanel/mixpanel-swift "Percentage of issues still open")
 [![CocoaPods Compatible](http://img.shields.io/cocoapods/v/Mixpanel-swift.svg)](https://mixpanel.com)
@@ -32,17 +26,12 @@
 <a name="introduction"></a>
 # Overview
 
-Welcome to the official Mixpanel Swift Library
+Welcome to the official Ours Privacy Swift Library
 
-The Mixpanel Swift library for iOS is an open-source project, and we'd love to see your contributions!
-We'd also love for you to come and work with us! Check out **[Jobs](https://mixpanel.com/jobs/#openings)** for details.
-
-If you are using Objective-C, we recommend using our **[Objective-C Library](https://github.com/mixpanel/mixpanel-iphone)**.
-
-Check out our [Advanced iOS Swift Guide](https://developer.mixpanel.com/docs/swift) for additional advanced configurations and use cases, like setting up your project with European Union data storage.
+The Ours Privacy Swift library for iOS is an open-source project based on the Mixpanel Swift library and aims to be 100% compatible with it.
 
 # Quick Start Guide
-Our master branch and our releases are on Swift 5. If you wish to use our Swift 4.2 implementation, please point to the v2.6.1 release. For Swift 4/4.1 implementation, please point to the v2.4.5 release. For Swift 3 implementation, please point to the v2.2.3 release.
+Our master branch and our releases are on Swift 5.
 
 ## 1. Install Mixpanel
 You will need your project token for initializing your library. You can get your project token from [project settings](https://mixpanel.com/settings/project).
@@ -90,7 +79,7 @@ Mixpanel.mainInstance().track(event: "Sign Up", properties: [
 In addition to event data, you can also send [user profile data](https://developer.mixpanel.com/docs/swift#storing-user-profiles). We recommend this after completing the quickstart guide.
 
 ## 4. Check for Success
-[Open up Events in Mixpanel](http://mixpanel.com/report/events) to view incoming events. 
+[Open up Events in Mixpanel](http://mixpanel.com/report/events) to view incoming events.
 
 Once data hits our API, it generally takes ~60 seconds for it to be processed, stored, and queryable in your project.
 
@@ -149,4 +138,3 @@ No worries, here are some links that you will find useful:
 * **[Full API Reference](https://mixpanel.github.io/mixpanel-swift)**
 
 Have any questions? Reach out to Mixpanel [Support](https://help.mixpanel.com/hc/en-us/requests/new) to speak to someone smart, quickly.
-
