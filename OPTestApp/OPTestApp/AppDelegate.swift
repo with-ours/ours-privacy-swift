@@ -1,12 +1,11 @@
 //
 //  AppDelegate.swift
-//  OursPrivacyiOSDemo
+//  OPTestApp
 //
-//  Created by Steve Krenek on 4/9/25.
+//  Created by Steve Krenek on 4/11/25.
 //
 
 import UIKit
-import OursPrivacy
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -14,12 +13,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        let serverURL = ProcessInfo.processInfo.environment["OURSPRIVACY_SERVER_URL"]
-        if let opToken = ProcessInfo.processInfo.environment["OURSPRIVACY_TOKEN"] {
-            OursPrivacy.initialize(token: opToken, trackAutomaticEvents: true, serverURL: serverURL)
-            OursPrivacy.mainInstance().loggingEnabled = true // Enable logging
-            OursPrivacy.mainInstance().flushInterval = 10.0 // Set auto-flush interval to 10 seconds.  (Defaults to never (0))
-        }
+        // Override point for customization after application launch.
         return true
     }
 
