@@ -2,8 +2,8 @@
 //  OursPrivacyiOSTests.swift
 //  OursPrivacyiOSTests
 //
-//  Created by Steve Krenek on 4/11/25.
-//  Copyright © 2025 Mixpanel. All rights reserved.
+//  Created by Zeytech on 4/11/25.
+//  Copyright © 2025 Ours Wellness Inc. All rights reserved.
 //
 
 import Testing
