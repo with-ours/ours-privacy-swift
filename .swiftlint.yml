@@ -1,7 +1,6 @@
 excluded:
   - .build/
   - build/
-  - MixpanelDemo
   - Sources/SelectorEvaluator.swift
   - Sources/CodelessBinding.swift
   - Sources/TweakViewData.swift
@@ -17,7 +16,6 @@ excluded:
   - Sources/ObjectFilter.swift
   - Sources/SSLSecurity.swift
   - Sources/NSAttributedStringToNSDictionary.swift
-  - Sources/MixpanelNotificationServiceExtension.swift
   - Sources/ObjectSerializer.swift
   - Sources/PushNotifications.swift
   - Sources/ObjectSerializerConfig.swift
