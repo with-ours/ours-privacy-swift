@@ -86,7 +86,19 @@ func application(_ application: UIApplication,
 }
 ```
 
-# FAQ
+## Contributing
+
+We welcome contributions! If you'd like to contribute to this SDK, please see our [publishing documentation](PUBLISHING.md) for development and publishing guidelines.
+
+## Support
+
+For help with this SDK, please:
+
+- Check the [documentation](https://docs.oursprivacy.com)
+- Open an issue on [GitHub](https://github.com/with-ours/ours-privacy-swift/issues)
+- Contact us at support@oursprivacy.com
+
+## FAQ
 **I have a test user I would like to opt out of tracking. How do I do that?**
 
 OursPrivacy's client-side tracking library contains the `optOutTracking()` method, which will set the user’s local opt-out state to “true” and will prevent data from being sent from a user’s device.
