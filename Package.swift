@@ -18,8 +18,14 @@ let package = Package(
             name: "OursPrivacy",
             path: "OursPrivacy",
             resources: [
-                .copy("OursPrivacy/Resources/PrivacyInfo.xcprivacy")
+                .copy("OursPrivacyResources/PrivacyInfo.xcprivacy"),
+                .copy("OursPrivacyiOS.docc")
             ]
+        ),
+        .testTarget(
+            name: "OursPrivacyTests",
+            dependencies: ["OursPrivacy"],
+            path: "Tests/OursPrivacyTests"
         )
     ]
 )
