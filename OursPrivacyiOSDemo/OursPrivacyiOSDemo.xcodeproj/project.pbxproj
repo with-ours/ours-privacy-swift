@@ -7,8 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		7F1A1DE42DA712990091ADFE /* OursPrivacy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F1A1DDD2DA712730091ADFE /* OursPrivacy.framework */; };
-		7F1A1DE52DA712990091ADFE /* OursPrivacy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 7F1A1DDD2DA712730091ADFE /* OursPrivacy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		7F1A1DE42DA712990091ADFE /* OursPrivacyKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F1A1DDD2DA712730091ADFE /* OursPrivacyKit.framework */; };
+		7F1A1DE52DA712990091ADFE /* OursPrivacyKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 7F1A1DDD2DA712730091ADFE /* OursPrivacyKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -42,7 +42,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				7F1A1DE52DA712990091ADFE /* OursPrivacy.framework in Embed Frameworks */,
+				7F1A1DE52DA712990091ADFE /* OursPrivacyKit.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -92,7 +92,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				7F1A1DE42DA712990091ADFE /* OursPrivacy.framework in Frameworks */,
+				7F1A1DE42DA712990091ADFE /* OursPrivacyKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -145,7 +145,7 @@
 		7F1A1DD62DA712730091ADFE /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				7F1A1DDD2DA712730091ADFE /* OursPrivacy.framework */,
+				7F1A1DDD2DA712730091ADFE /* OursPrivacyKit.framework */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -273,10 +273,10 @@
 /* End PBXProject section */
 
 /* Begin PBXReferenceProxy section */
-		7F1A1DDD2DA712730091ADFE /* OursPrivacy.framework */ = {
+		7F1A1DDD2DA712730091ADFE /* OursPrivacyKit.framework */ = {
 			isa = PBXReferenceProxy;
 			fileType = wrapper.framework;
-			path = OursPrivacy.framework;
+			path = OursPrivacyKit.framework;
 			remoteRef = 7F1A1DDC2DA712730091ADFE /* PBXContainerItemProxy */;
 			sourceTree = BUILT_PRODUCTS_DIR;
 		};

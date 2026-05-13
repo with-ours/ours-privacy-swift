@@ -6,7 +6,7 @@
 //
 
 import UIKit
-import OursPrivacy
+import OursPrivacyKit
 
 class ViewController: UIViewController {
     

@@ -166,7 +166,7 @@ open class OursPrivacyInstance: CustomDebugStringConvertible, FlushDelegate, AED
     
     /// The base URL used for OursPrivacy API requests.
     /// Useful if you need to proxy OursPrivacy requests. Defaults to
-    /// https://api.oursprivacy.com/api/v1
+    /// https://cdn.oursprivacy.com
     open var serverURL = BasePath.DefaultAPIEndpoint {
         didSet {
             flushInstance.serverURL = serverURL
@@ -249,7 +249,7 @@ open class OursPrivacyInstance: CustomDebugStringConvertible, FlushDelegate, AED
     
     let readWriteLock: ReadWriteLock
 #if os(iOS) && !targetEnvironment(macCatalyst)
-    static let reachability = SCNetworkReachabilityCreateWithName(nil, "api.oursprivacy.com")
+    static let reachability = SCNetworkReachabilityCreateWithName(nil, "cdn.oursprivacy.com")
     static let telephonyInfo = CTTelephonyNetworkInfo()
 #endif
 #if !os(OSX) && !os(watchOS)
@@ -760,7 +760,13 @@ extension OursPrivacyInstance {
                 requestData.updateValue(up, forKey: "userProperties")
             }
             if let requestDataStr = JSONHandler.encodeAPIData(requestData) {
-                let result = flushInstance.flushRequest.sendRequest(requestDataStr, type: .identify, useIP: true, headers: headers, queryItems: queryItems)
+                // All flushes (including identify) POST to `/ingest`. The
+                // payload shape here is legacy two-key `{userId, token, ...}`
+                // and is queued for replacement with the canonical three-tier
+                // wire shape during Wave 2 of the RN parity work; that wave
+                // is also expected to delete this synchronous side-channel
+                // POST in favor of the `track("$identify", ...)` call above.
+                let result = flushInstance.flushRequest.sendRequest(requestDataStr, type: .events, useIP: true, headers: headers, queryItems: queryItems)
                 if !result {
                     OursPrivacyLogger.warn(message: "Remote call to identify failed")
                 }

@@ -7,7 +7,7 @@
 //
 
 import Testing
-@testable import OursPrivacy
+@testable import OursPrivacyKit
 
 struct OursPrivacyiOSTests {
 

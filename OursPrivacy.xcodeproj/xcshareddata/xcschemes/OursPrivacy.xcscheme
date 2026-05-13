@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "7F4C45472DA98C4800F07B25"
-               BuildableName = "OursPrivacy.framework"
+               BuildableName = "OursPrivacyKit.framework"
                BlueprintName = "OursPrivacy"
                ReferencedContainer = "container:OursPrivacy.xcodeproj">
             </BuildableReference>
@@ -67,7 +67,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "7F4C45472DA98C4800F07B25"
-            BuildableName = "OursPrivacy.framework"
+            BuildableName = "OursPrivacyKit.framework"
             BlueprintName = "OursPrivacy"
             ReferencedContainer = "container:OursPrivacy.xcodeproj">
          </BuildableReference>

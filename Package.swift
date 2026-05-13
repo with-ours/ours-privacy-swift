@@ -2,8 +2,11 @@
 
 import PackageDescription
 
+// The Swift module is named `OursPrivacyKit` so consumers can `import
+// OursPrivacyKit` and reference the `OursPrivacy` class without the module
+// name shadowing the type. See the React Native parity plan for context.
 let package = Package(
-    name: "OursPrivacy",
+    name: "OursPrivacyKit",
     platforms: [
       .iOS(.v11),
       .tvOS(.v11),
@@ -11,11 +14,11 @@ let package = Package(
       .watchOS(.v4)
     ],
     products: [
-        .library(name: "OursPrivacy", targets: ["OursPrivacy"])
+        .library(name: "OursPrivacyKit", targets: ["OursPrivacyKit"])
     ],
     targets: [
         .target(
-            name: "OursPrivacy",
+            name: "OursPrivacyKit",
             path: "OursPrivacy",
             resources: [
                 .copy("OursPrivacyResources/PrivacyInfo.xcprivacy"),
@@ -23,9 +26,14 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "OursPrivacyTests",
-            dependencies: ["OursPrivacy"],
+            name: "OursPrivacyKitTests",
+            dependencies: ["OursPrivacyKit"],
             path: "Tests/OursPrivacyTests"
+        ),
+        .target(
+            name: "RecorderProbe",
+            dependencies: ["OursPrivacyKit"],
+            path: "tools/recorder-probe"
         )
     ]
 )
