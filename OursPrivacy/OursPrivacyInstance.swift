@@ -745,7 +745,7 @@ extension OursPrivacy {
     // MARK: - Opt-out
 
     /// Stops all tracking. Pending events are dropped; `visitor_id` is
-    /// regenerated.
+    /// regenerated; the local event queue is cleared.
     public func optOutTracking() {
         trackingQueue.async { [weak self] in
             guard let self = self else { return }
@@ -757,6 +757,7 @@ extension OursPrivacy {
                 self.userConsentProperties = [:]
                 self.attributionDefaultProperties = [:]
             }
+            self.oursprivacyPersistence.resetEntities()
             self.archive()
             self.readWriteLock.write {
                 self.optOutStatus = true
