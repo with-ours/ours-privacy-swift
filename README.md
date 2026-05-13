@@ -130,6 +130,15 @@ public struct OursPrivacyUserProperties {
     public var phoneNumber: String?
     public var firstName: String?
     public var lastName: String?
+    public var gender: String?
+    public var dateOfBirth: String?
+    public var city: String?
+    public var state: String?
+    public var zip: String?
+    public var country: String?
+    public var companyName: String?
+    public var jobTitle: String?
+    public var ip: String?
     public var customProperties: [String: OursPrivacyType]?
     public var consent: [String: OursPrivacyType]?
 }

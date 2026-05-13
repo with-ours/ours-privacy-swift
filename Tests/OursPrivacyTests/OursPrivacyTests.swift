@@ -236,17 +236,38 @@ final class OursPrivacyTests: XCTestCase {
             externalId: "ext-1",
             phoneNumber: "+1555",
             firstName: "Jane",
-            lastName: "Doe")
+            lastName: "Doe",
+            gender: "female",
+            dateOfBirth: "1990-01-02",
+            city: "Brooklyn",
+            state: "NY",
+            zip: "11201",
+            country: "US",
+            companyName: "Acme",
+            jobTitle: "Engineer",
+            ip: "1.2.3.4")
         let wire = typed.toWireProperties()
         XCTAssertEqual(wire["email"] as? String, "u@example.com")
         XCTAssertEqual(wire["external_id"] as? String, "ext-1")
         XCTAssertEqual(wire["phone_number"] as? String, "+1555")
         XCTAssertEqual(wire["first_name"] as? String, "Jane")
         XCTAssertEqual(wire["last_name"] as? String, "Doe")
+        XCTAssertEqual(wire["gender"] as? String, "female")
+        XCTAssertEqual(wire["date_of_birth"] as? String, "1990-01-02")
+        XCTAssertEqual(wire["city"] as? String, "Brooklyn")
+        XCTAssertEqual(wire["state"] as? String, "NY")
+        XCTAssertEqual(wire["zip"] as? String, "11201")
+        XCTAssertEqual(wire["country"] as? String, "US")
+        XCTAssertEqual(wire["company_name"] as? String, "Acme")
+        XCTAssertEqual(wire["job_title"] as? String, "Engineer")
+        XCTAssertEqual(wire["ip"] as? String, "1.2.3.4")
         // No camelCase keys leak onto the wire.
         XCTAssertNil(wire["externalId"])
         XCTAssertNil(wire["phoneNumber"])
         XCTAssertNil(wire["firstName"])
+        XCTAssertNil(wire["dateOfBirth"])
+        XCTAssertNil(wire["companyName"])
+        XCTAssertNil(wire["jobTitle"])
     }
 
     func testUserPropertiesStructPassesNestedDictsThrough() {
