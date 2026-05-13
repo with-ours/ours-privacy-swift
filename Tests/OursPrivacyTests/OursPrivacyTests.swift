@@ -114,8 +114,9 @@ final class OursPrivacyTests: XCTestCase {
     func testComposeIdentifyEventCanonicalShape() {
         let track = Track()
         let item = track.composeIdentifyEvent(
-            distinctId: "user-123",
-            userProperties: ["email": "u@example.com", "first_name": "U"],
+            userProperties: ["external_id": "user-123",
+                             "email": "u@example.com",
+                             "first_name": "U"],
             context: makeContext())
         XCTAssertEqual(item["event"] as? String, "$identify")
         XCTAssertTrue(item["eventProperties"] is NSNull)
@@ -123,6 +124,33 @@ final class OursPrivacyTests: XCTestCase {
         XCTAssertEqual(up?["external_id"] as? String, "user-123")
         XCTAssertEqual(up?["email"] as? String, "u@example.com")
         XCTAssertEqual(up?["first_name"] as? String, "U")
+    }
+
+    func testIdentifyAcceptsNoArgs() {
+        // No external id required; calling identify() with nothing fires
+        // an empty $identify event.
+        let op = makeInstance()
+        op.identify()
+        op.trackingQueue.sync {}
+        let pending = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(pending.count, 1)
+        XCTAssertEqual(pending[0]["event"] as? String, "$identify")
+        // No external_id should be present when the caller didn't supply one.
+        if let up = pending[0]["userProperties"] as? [String: Any] {
+            XCTAssertNil(up["external_id"])
+        }
+    }
+
+    func testIdentifySetsExternalIdFromStructField() {
+        let op = makeInstance()
+        op.identify(OursPrivacyUserProperties(email: "u@example.com",
+                                              externalId: "user-123"))
+        op.trackingQueue.sync {}
+        let pending = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(pending.count, 1)
+        let up = pending[0]["userProperties"] as? [String: Any]
+        XCTAssertEqual(up?["external_id"] as? String, "user-123")
+        XCTAssertEqual(up?["email"] as? String, "u@example.com")
     }
 
     // MARK: - userProperties merge (web-cdp parity)

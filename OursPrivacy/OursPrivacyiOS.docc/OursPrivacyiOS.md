@@ -12,8 +12,8 @@ import OursPrivacyKit
 let op = OursPrivacy(token: "YOUR_TOKEN", trackAutomaticEvents: true)
 await op.initialize()
 
-op.identify(distinctId: "user-123",
-            userProperties: OursPrivacyUserProperties(email: "ada@example.com"))
+op.identify(OursPrivacyUserProperties(email: "ada@example.com",
+                                      externalId: "user-123"))
 
 op.track(event: "Sign Up", properties: ["plan": "pro"])
 ```
@@ -30,7 +30,7 @@ The full README — including the payload structure, migration notes from 1.x, a
 
 ### Identity
 
-- ``OursPrivacy/identify(distinctId:userProperties:completion:)``
+- ``OursPrivacy/identify(_:completion:)``
 - ``OursPrivacy/getVisitorId()``
 - ``OursPrivacy/setVisitorId(_:)``
 - ``OursPrivacy/reset(completion:)``
@@ -59,7 +59,7 @@ The full README — including the payload structure, migration notes from 1.x, a
 ### Opt-out
 
 - ``OursPrivacy/optOutTracking()``
-- ``OursPrivacy/optInTracking(distinctId:properties:)``
+- ``OursPrivacy/optInTracking(userProperties:properties:)``
 - ``OursPrivacy/hasOptedOutTracking()``
 
 ### Logging and delegates

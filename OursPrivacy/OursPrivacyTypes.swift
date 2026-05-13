@@ -84,18 +84,24 @@ public struct OursPrivacyInitOptions {
     /// `identify` and `track` call.
     public var defaultUserConsentProperties: [String: OursPrivacyType]?
 
+    /// If `true`, opts the visitor out on first launch. Ignored when a
+    /// prior opt-in / opt-out decision is already persisted.
+    public var optedOutByDefault: Bool?
+
     public init(serverURL: String? = nil,
                 visitorId: String? = nil,
                 initialURL: String? = nil,
                 defaultEventProperties: [String: OursPrivacyType]? = nil,
                 defaultUserCustomProperties: [String: OursPrivacyType]? = nil,
-                defaultUserConsentProperties: [String: OursPrivacyType]? = nil) {
+                defaultUserConsentProperties: [String: OursPrivacyType]? = nil,
+                optedOutByDefault: Bool? = nil) {
         self.serverURL = serverURL
         self.visitorId = visitorId
         self.initialURL = initialURL
         self.defaultEventProperties = defaultEventProperties
         self.defaultUserCustomProperties = defaultUserCustomProperties
         self.defaultUserConsentProperties = defaultUserConsentProperties
+        self.optedOutByDefault = optedOutByDefault
     }
 }
 

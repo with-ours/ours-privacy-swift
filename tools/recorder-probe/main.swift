@@ -23,9 +23,9 @@ Task {
     op.setLoggingEnabled(true)
     op.flushInterval = 0
 
-    op.identify(distinctId: "probe-user",
-                userProperties: OursPrivacyUserProperties(email: "probe@example.com",
-                                                         firstName: "Probe"))
+    op.identify(OursPrivacyUserProperties(email: "probe@example.com",
+                                          externalId: "probe-user",
+                                          firstName: "Probe"))
 
     op.track(event: "Probe Event", properties: [
         "value": 42,
