@@ -1,0 +1,94 @@
+{
+  "data": [
+    {
+      "defaultProperties": {
+        "device_model": "arm64",
+        "device_type": "desktop",
+        "device_vendor": "Apple",
+        "os_name": "macOS",
+        "os_version": "Version 26.4.1 (Build 25E253)",
+        "screen_height": 1080,
+        "screen_width": 1920,
+        "version": "4.3.1"
+      },
+      "distinct_id": "D8FBA88E-1814-4583-9611-BEA48FA3E887",
+      "event": "$identify",
+      "eventProperties": null,
+      "userProperties": {
+        "email": "probe@example.com",
+        "external_id": "probe-user",
+        "first_name": "Probe"
+      },
+      "visitor_id": "28B1BEEC-FE19-426C-9CC7-FED0421463BB"
+    },
+    {
+      "defaultProperties": {
+        "device_model": "arm64",
+        "device_type": "desktop",
+        "device_vendor": "Apple",
+        "os_name": "macOS",
+        "os_version": "Version 26.4.1 (Build 25E253)",
+        "screen_height": 1080,
+        "screen_width": 1920,
+        "version": "4.3.1"
+      },
+      "distinct_id": "959B1318-43B7-4C54-A2E3-B7585F16B2C6",
+      "event": "Probe Event",
+      "eventProperties": {
+        "is_probe": true,
+        "platform": "swift",
+        "value": 42
+      },
+      "userProperties": null,
+      "visitor_id": "28B1BEEC-FE19-426C-9CC7-FED0421463BB"
+    },
+    {
+      "defaultProperties": {
+        "device_model": "arm64",
+        "device_type": "desktop",
+        "device_vendor": "Apple",
+        "os_name": "macOS",
+        "os_version": "Version 26.4.1 (Build 25E253)",
+        "screen_height": 1080,
+        "screen_width": 1920,
+        "version": "4.3.1"
+      },
+      "distinct_id": "C61984CA-DDDE-4029-BE2B-F2E2C5EF6E9E",
+      "event": "Probe Event With Many Props",
+      "eventProperties": {
+        "bool_prop": false,
+        "double_prop": 3.14,
+        "int_prop": 7,
+        "string_prop": "hello"
+      },
+      "userProperties": null,
+      "visitor_id": "28B1BEEC-FE19-426C-9CC7-FED0421463BB"
+    },
+    {
+      "defaultProperties": {
+        "device_model": "arm64",
+        "device_type": "desktop",
+        "device_vendor": "Apple",
+        "os_name": "macOS",
+        "os_version": "Version 26.4.1 (Build 25E253)",
+        "screen_height": 1080,
+        "screen_width": 1920,
+        "version": "4.3.1"
+      },
+      "distinct_id": "977C92D7-ABA6-4D19-8561-C32D11F84DC8",
+      "event": "Probe Event With User Props",
+      "eventProperties": {
+        "source": "probe"
+      },
+      "userProperties": {
+        "custom_properties": {
+          "tier": "gold"
+        },
+        "email": "probe-track@example.com"
+      },
+      "visitor_id": "28B1BEEC-FE19-426C-9CC7-FED0421463BB"
+    }
+  ],
+  "is_manually_set_id": false,
+  "token": "probe-token"
+}

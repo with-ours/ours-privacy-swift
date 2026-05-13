@@ -6,7 +6,7 @@
 //
 
 import UIKit
-import OursPrivacy
+import OursPrivacyKit
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {

@@ -39,7 +39,7 @@ The easiest way to get Ours Privacy into your iOS project is to use Swift Packag
 ## 2. Initialize Ours Privacy
 Import `OursPrivacy` into AppDelegate.swift, and initialize OursPrivacy within application:didFinishLaunchingWithOptions:
 ```swift
-import OursPrivacy
+import OursPrivacyKit
 
 func application(_ application: UIApplication,
                  didFinishLaunchingWithOptions launchOptions: [NSObject: AnyObject]?) -> Bool {
@@ -72,7 +72,7 @@ OursPrivacy.mainInstance().track(event: "Sign Up", properties: [
 ## Complete Code Example
 Here's a runnable code example that covers everything in this quickstart guide.
 ```swift
-import OursPrivacy
+import OursPrivacyKit
 
 func application(_ application: UIApplication,
                  didFinishLaunchingWithOptions launchOptions: [NSObject: AnyObject]?) -> Bool {

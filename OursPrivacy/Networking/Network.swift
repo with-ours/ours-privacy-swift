@@ -11,7 +11,7 @@
 import Foundation
 
 struct BasePath {
-    static let DefaultAPIEndpoint = "https://api.oursprivacy.com/api/v1"
+    static let DefaultAPIEndpoint = "https://cdn.oursprivacy.com"
     
     static func buildURL(base: String, path: String, queryItems: [URLQueryItem]?) -> URL? {
         guard let url = URL(string: base) else {

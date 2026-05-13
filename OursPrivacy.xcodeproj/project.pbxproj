@@ -8,7 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		7F4C454D2DA98C4800F07B25 /* OursPrivacyiOS.docc in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C454C2DA98C4800F07B25 /* OursPrivacyiOS.docc */; };
-		7F4C45532DA98C4900F07B25 /* OursPrivacy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F4C45482DA98C4800F07B25 /* OursPrivacy.framework */; };
+		7F4C45532DA98C4900F07B25 /* OursPrivacyKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F4C45482DA98C4800F07B25 /* OursPrivacyKit.framework */; };
 		7F4C45902DA98DCA00F07B25 /* OursPrivacy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C45862DA98DCA00F07B25 /* OursPrivacy.swift */; };
 		7F4C45912DA98DCA00F07B25 /* OursPrivacyPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C45892DA98DCA00F07B25 /* OursPrivacyPersistence.swift */; };
 		7F4C45922DA98DCA00F07B25 /* Flush.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C457F2DA98DCA00F07B25 /* Flush.swift */; };
@@ -25,7 +25,6 @@
 		7F4C45A02DA98DCA00F07B25 /* AutomaticProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C457B2DA98DCA00F07B25 /* AutomaticProperties.swift */; };
 		7F4C45A12DA98DCA00F07B25 /* ReadWriteLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C458D2DA98DCA00F07B25 /* ReadWriteLock.swift */; };
 		7F4C45A22DA98DCA00F07B25 /* Network.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C45842DA98DCA00F07B25 /* Network.swift */; };
-		7F4C45A32DA98DCA00F07B25 /* SessionMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C458E2DA98DCA00F07B25 /* SessionMetadata.swift */; };
 		7F4C45A42DA98DCA00F07B25 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C457C2DA98DCA00F07B25 /* Constants.swift */; };
 		7F4C45A52DA98DCA00F07B25 /* FlushRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C45802DA98DCA00F07B25 /* FlushRequest.swift */; };
 		7F4C45B32DA994FB00F07B25 /* CoreTelephony.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F4C45B22DA994FB00F07B25 /* CoreTelephony.framework */; };
@@ -42,7 +41,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		7F4C45482DA98C4800F07B25 /* OursPrivacy.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = OursPrivacy.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		7F4C45482DA98C4800F07B25 /* OursPrivacyKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = OursPrivacyKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		7F4C454C2DA98C4800F07B25 /* OursPrivacyiOS.docc */ = {isa = PBXFileReference; lastKnownFileType = folder.documentationcatalog; path = OursPrivacyiOS.docc; sourceTree = "<group>"; };
 		7F4C45522DA98C4900F07B25 /* OursPrivacyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OursPrivacyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7F4C457A2DA98DCA00F07B25 /* AutomaticEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomaticEvents.swift; sourceTree = "<group>"; };
@@ -62,12 +61,11 @@
 		7F4C458A2DA98DCA00F07B25 /* OursPrivacyType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OursPrivacyType.swift; sourceTree = "<group>"; };
 		7F4C458C2DA98DCA00F07B25 /* PrintLogging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintLogging.swift; sourceTree = "<group>"; };
 		7F4C458D2DA98DCA00F07B25 /* ReadWriteLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadWriteLock.swift; sourceTree = "<group>"; };
-		7F4C458E2DA98DCA00F07B25 /* SessionMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionMetadata.swift; sourceTree = "<group>"; };
 		7F4C458F2DA98DCA00F07B25 /* Track.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Track.swift; sourceTree = "<group>"; };
 		7F4C45B22DA994FB00F07B25 /* CoreTelephony.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreTelephony.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.4.sdk/System/Library/Frameworks/CoreTelephony.framework; sourceTree = DEVELOPER_DIR; };
-		86F86E81224404BD00B69832 /* OursPrivacy.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = OursPrivacy.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		E12782B31D4AB4B30025FB05 /* OursPrivacy.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = OursPrivacy.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		E1F15FC91E64A10700391AE3 /* OursPrivacy.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = OursPrivacy.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		86F86E81224404BD00B69832 /* OursPrivacyKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = OursPrivacyKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		E12782B31D4AB4B30025FB05 /* OursPrivacyKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = OursPrivacyKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		E1F15FC91E64A10700391AE3 /* OursPrivacyKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = OursPrivacyKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -88,7 +86,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				7F4C45532DA98C4900F07B25 /* OursPrivacy.framework in Frameworks */,
+				7F4C45532DA98C4900F07B25 /* OursPrivacyKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -162,7 +160,6 @@
 				7F4C45892DA98DCA00F07B25 /* OursPrivacyPersistence.swift */,
 				7F4C458A2DA98DCA00F07B25 /* OursPrivacyType.swift */,
 				7F4C458D2DA98DCA00F07B25 /* ReadWriteLock.swift */,
-				7F4C458E2DA98DCA00F07B25 /* SessionMetadata.swift */,
 				7F4C45822DA98DCA00F07B25 /* JSONHandler.swift */,
 			);
 			path = Utilities;
@@ -189,10 +186,10 @@
 		E115947E1CFF1491007F8B4F /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				E12782B31D4AB4B30025FB05 /* OursPrivacy.framework */,
-				E1F15FC91E64A10700391AE3 /* OursPrivacy.framework */,
-				86F86E81224404BD00B69832 /* OursPrivacy.framework */,
-				7F4C45482DA98C4800F07B25 /* OursPrivacy.framework */,
+				E12782B31D4AB4B30025FB05 /* OursPrivacyKit.framework */,
+				E1F15FC91E64A10700391AE3 /* OursPrivacyKit.framework */,
+				86F86E81224404BD00B69832 /* OursPrivacyKit.framework */,
+				7F4C45482DA98C4800F07B25 /* OursPrivacyKit.framework */,
 				7F4C45522DA98C4900F07B25 /* OursPrivacyTests.xctest */,
 			);
 			name = Products;
@@ -244,7 +241,7 @@
 			packageProductDependencies = (
 			);
 			productName = OursPrivacyiOS;
-			productReference = 7F4C45482DA98C4800F07B25 /* OursPrivacy.framework */;
+			productReference = 7F4C45482DA98C4800F07B25 /* OursPrivacyKit.framework */;
 			productType = "com.apple.product-type.framework";
 		};
 		7F4C45512DA98C4900F07B25 /* OursPrivacyTests */ = {
@@ -285,7 +282,7 @@
 			);
 			name = OursPrivacy_watchOS;
 			productName = OursPrivacy_watchOS;
-			productReference = 86F86E81224404BD00B69832 /* OursPrivacy.framework */;
+			productReference = 86F86E81224404BD00B69832 /* OursPrivacyKit.framework */;
 			productType = "com.apple.product-type.framework";
 		};
 		E12782B21D4AB4B30025FB05 /* OursPrivacy_tvOS */ = {
@@ -303,7 +300,7 @@
 			);
 			name = OursPrivacy_tvOS;
 			productName = OursPrivacy_tvOS;
-			productReference = E12782B31D4AB4B30025FB05 /* OursPrivacy.framework */;
+			productReference = E12782B31D4AB4B30025FB05 /* OursPrivacyKit.framework */;
 			productType = "com.apple.product-type.framework";
 		};
 		E1F15FC81E64A10700391AE3 /* OursPrivacy_macOS */ = {
@@ -321,7 +318,7 @@
 			);
 			name = OursPrivacy_macOS;
 			productName = OursPrivacy_OSX;
-			productReference = E1F15FC91E64A10700391AE3 /* OursPrivacy.framework */;
+			productReference = E1F15FC91E64A10700391AE3 /* OursPrivacyKit.framework */;
 			productType = "com.apple.product-type.framework";
 		};
 /* End PBXNativeTarget section */
@@ -439,7 +436,6 @@
 				7F4C45A02DA98DCA00F07B25 /* AutomaticProperties.swift in Sources */,
 				7F4C45A12DA98DCA00F07B25 /* ReadWriteLock.swift in Sources */,
 				7F4C45A22DA98DCA00F07B25 /* Network.swift in Sources */,
-				7F4C45A32DA98DCA00F07B25 /* SessionMetadata.swift in Sources */,
 				7F4C45A42DA98DCA00F07B25 /* Constants.swift in Sources */,
 				7F4C45A52DA98DCA00F07B25 /* FlushRequest.swift in Sources */,
 				7F4C454D2DA98C4800F07B25 /* OursPrivacyiOS.docc in Sources */,
@@ -521,7 +517,8 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.oursprivacy.OursPrivacyiOS;
-				PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)";
+				PRODUCT_MODULE_NAME = OursPrivacyKit;
+				PRODUCT_NAME = OursPrivacyKit;
 				SKIP_INSTALL = NO;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -567,7 +564,8 @@
 				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++20";
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.oursprivacy.OursPrivacyiOS;
-				PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)";
+				PRODUCT_MODULE_NAME = OursPrivacyKit;
+				PRODUCT_NAME = OursPrivacyKit;
 				SKIP_INSTALL = NO;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_EMIT_LOC_STRINGS = YES;

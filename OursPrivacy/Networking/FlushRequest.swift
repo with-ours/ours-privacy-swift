@@ -11,10 +11,9 @@
 import Foundation
 
 enum FlushType: String {
-    case events = "/track"
-    case identify = "/identify"
-//    case people = "/identify/"
-//    case groups = "/groups/"
+    // Everything flushes through `/ingest`. The wire-shape `event` name
+    // (e.g. `$identify`) tells the server how to route the payload.
+    case events = "/ingest"
 }
 
 class FlushRequest: Network {

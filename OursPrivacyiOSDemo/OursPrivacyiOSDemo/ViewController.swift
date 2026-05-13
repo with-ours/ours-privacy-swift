@@ -6,7 +6,7 @@
 //
 
 import UIKit
-import OursPrivacy
+import OursPrivacyKit
 
 class ViewController: UIViewController {
     
@@ -24,8 +24,8 @@ class ViewController: UIViewController {
     }
     
     @IBAction func start(_ sender: Any) {
-        OursPrivacy.mainInstance().userId = txtId.text ?? "demo_user"
-        OursPrivacy.mainInstance().identify(distinctId: OursPrivacy.mainInstance().userId!, userProperties: ["email": "someone@example.com"])
+        let externalId = txtId.text ?? "demo_user"
+        OursPrivacy.mainInstance().identify(distinctId: externalId, userProperties: ["email": "someone@example.com"])
         OursPrivacy.mainInstance().track(event: "Started")
         OursPrivacy.mainInstance().flush()
         btnYellow.isEnabled = true
