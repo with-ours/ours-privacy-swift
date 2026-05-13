@@ -20,7 +20,6 @@
 		7F4C459B2DA98DCA00F07B25 /* PrintLogging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C458C2DA98DCA00F07B25 /* PrintLogging.swift */; };
 		7F4C459C2DA98DCA00F07B25 /* OursPrivacyInstance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C45872DA98DCA00F07B25 /* OursPrivacyInstance.swift */; };
 		7F4C459D2DA98DCA00F07B25 /* AutomaticEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C457A2DA98DCA00F07B25 /* AutomaticEvents.swift */; };
-		7F4C459E2DA98DCA00F07B25 /* OPDB.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C45852DA98DCA00F07B25 /* OPDB.swift */; };
 		7F4C459F2DA98DCA00F07B25 /* Track.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C458F2DA98DCA00F07B25 /* Track.swift */; };
 		7F4C45A02DA98DCA00F07B25 /* AutomaticProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C457B2DA98DCA00F07B25 /* AutomaticProperties.swift */; };
 		7F4C45A12DA98DCA00F07B25 /* ReadWriteLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C458D2DA98DCA00F07B25 /* ReadWriteLock.swift */; };
@@ -55,7 +54,6 @@
 		7F4C45802DA98DCA00F07B25 /* FlushRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlushRequest.swift; sourceTree = "<group>"; };
 		7F4C45822DA98DCA00F07B25 /* JSONHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONHandler.swift; sourceTree = "<group>"; };
 		7F4C45842DA98DCA00F07B25 /* Network.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Network.swift; sourceTree = "<group>"; };
-		7F4C45852DA98DCA00F07B25 /* OPDB.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPDB.swift; sourceTree = "<group>"; };
 		7F4C45862DA98DCA00F07B25 /* OursPrivacy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OursPrivacy.swift; sourceTree = "<group>"; };
 		7F4C45872DA98DCA00F07B25 /* OursPrivacyInstance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OursPrivacyInstance.swift; sourceTree = "<group>"; };
 		7F4C45882DA98DCA00F07B25 /* OursPrivacyLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OursPrivacyLogger.swift; sourceTree = "<group>"; };
@@ -162,7 +160,6 @@
 				7F4C457B2DA98DCA00F07B25 /* AutomaticProperties.swift */,
 				7F4C457C2DA98DCA00F07B25 /* Constants.swift */,
 				7F4C457D2DA98DCA00F07B25 /* Error.swift */,
-				7F4C45852DA98DCA00F07B25 /* OPDB.swift */,
 				7F4C45892DA98DCA00F07B25 /* OursPrivacyPersistence.swift */,
 				7F4C458A2DA98DCA00F07B25 /* OursPrivacyType.swift */,
 				7F4C458D2DA98DCA00F07B25 /* ReadWriteLock.swift */,
@@ -437,7 +434,6 @@
 				7F4C459B2DA98DCA00F07B25 /* PrintLogging.swift in Sources */,
 				7F4C459C2DA98DCA00F07B25 /* OursPrivacyInstance.swift in Sources */,
 				7F4C459D2DA98DCA00F07B25 /* AutomaticEvents.swift in Sources */,
-				7F4C459E2DA98DCA00F07B25 /* OPDB.swift in Sources */,
 				7F4C459F2DA98DCA00F07B25 /* Track.swift in Sources */,
 				7F4C45A02DA98DCA00F07B25 /* AutomaticProperties.swift in Sources */,
 				7F4C45A12DA98DCA00F07B25 /* ReadWriteLock.swift in Sources */,

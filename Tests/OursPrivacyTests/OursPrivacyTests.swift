@@ -411,4 +411,116 @@ final class OursPrivacyTests: XCTestCase {
         let ctx = op.currentEventContext()
         XCTAssertTrue(ctx.attributionDefaultProperties.isEmpty)
     }
+
+    // MARK: - Persistence (in-memory queue + UserDefaults blob)
+
+    private func makePersistence() -> OursPrivacyPersistence {
+        let instanceName = "persist-test-\(UUID().uuidString)"
+        return OursPrivacyPersistence(instanceName: instanceName)
+    }
+
+    private func makeEntity(_ event: String) -> InternalProperties {
+        [
+            "event": event,
+            "visitor_id": "v-\(UUID().uuidString)",
+            "distinct_id": "d-\(UUID().uuidString)",
+            "eventProperties": ["k": "v"] as InternalProperties,
+            "userProperties": NSNull(),
+            "defaultProperties": [:] as InternalProperties,
+        ]
+    }
+
+    func testQueueRoundTripsThroughUserDefaultsBlob() {
+        let name = "rt-\(UUID().uuidString)"
+        let first = OursPrivacyPersistence(instanceName: name)
+        first.saveEntity(makeEntity("A"), type: .events)
+        first.saveEntity(makeEntity("B"), type: .events)
+
+        // Recreate the persistence object — simulates a fresh app launch.
+        let second = OursPrivacyPersistence(instanceName: name)
+        let loaded = second.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(loaded.count, 2)
+        XCTAssertEqual(loaded[0]["event"] as? String, "A")
+        XCTAssertEqual(loaded[1]["event"] as? String, "B")
+
+        // Clean up so subsequent test runs don't see this queue.
+        OursPrivacyPersistence.deleteUserDefaultsData(instanceName: name)
+    }
+
+    func testResetEntitiesClearsQueue() {
+        let p = makePersistence()
+        p.saveEntity(makeEntity("A"), type: .events)
+        p.saveEntity(makeEntity("B"), type: .events)
+        XCTAssertEqual(p.loadEntitiesInBatch(type: .events).count, 2)
+        p.resetEntities()
+        XCTAssertEqual(p.loadEntitiesInBatch(type: .events).count, 0)
+        OursPrivacyPersistence.deleteUserDefaultsData(instanceName: p.instanceName)
+    }
+
+    func testRemoveEntitiesByIdDrainsQueue() {
+        let p = makePersistence()
+        p.saveEntity(makeEntity("A"), type: .events)
+        p.saveEntity(makeEntity("B"), type: .events)
+        p.saveEntity(makeEntity("C"), type: .events)
+        let loaded = p.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(loaded.count, 3)
+        let firstTwoIds = loaded.prefix(2).compactMap { $0["id"] as? Int32 }
+        XCTAssertEqual(firstTwoIds.count, 2)
+
+        p.removeEntitiesInBatch(type: .events, ids: firstTwoIds)
+        let remaining = p.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(remaining.count, 1)
+        XCTAssertEqual(remaining[0]["event"] as? String, "C")
+
+        OursPrivacyPersistence.deleteUserDefaultsData(instanceName: p.instanceName)
+    }
+
+    func testLoadEntitiesInBatchRespectsBatchSize() {
+        let p = makePersistence()
+        for event in ["A", "B", "C", "D"] {
+            p.saveEntity(makeEntity(event), type: .events)
+        }
+        XCTAssertEqual(p.loadEntitiesInBatch(type: .events, batchSize: 2).count, 2)
+        XCTAssertEqual(p.loadEntitiesInBatch(type: .events, batchSize: 10).count, 4)
+        OursPrivacyPersistence.deleteUserDefaultsData(instanceName: p.instanceName)
+    }
+
+    func testExcludeAutomaticEventsFiltersAEPrefix() {
+        let p = makePersistence()
+        p.saveEntity(makeEntity("$ae_session"), type: .events)
+        p.saveEntity(makeEntity("Purchase"), type: .events)
+        let filtered = p.loadEntitiesInBatch(type: .events, excludeAutomaticEvents: true)
+        XCTAssertEqual(filtered.count, 1)
+        XCTAssertEqual(filtered[0]["event"] as? String, "Purchase")
+        OursPrivacyPersistence.deleteUserDefaultsData(instanceName: p.instanceName)
+    }
+
+    func testOptOutTrackingClearsQueue() {
+        let op = makeInstance()
+        op.track(event: "before-opt-out")
+        op.trackingQueue.sync {}
+        XCTAssertGreaterThan(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).count, 0)
+
+        op.optOutTracking()
+        op.trackingQueue.sync {}
+        XCTAssertEqual(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).count, 0)
+    }
+
+    func testWipeLegacySQLiteFileIfPresent() {
+        let manager = FileManager.default
+        let instanceName = "legacy-wipe-\(UUID().uuidString)"
+        let sanitized = String(instanceName.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
+#if os(iOS)
+        let directory = manager.urls(for: .libraryDirectory, in: .userDomainMask).last!
+#else
+        let directory = manager.urls(for: .cachesDirectory, in: .userDomainMask).last!
+#endif
+        let filePath = directory.appendingPathComponent("\(sanitized)_OPDB.sqlite").path
+        try? manager.removeItem(atPath: filePath)
+        manager.createFile(atPath: filePath, contents: Data("legacy".utf8))
+        XCTAssertTrue(manager.fileExists(atPath: filePath))
+
+        OursPrivacyPersistence.wipeLegacySQLiteFileIfPresent(instanceName: instanceName)
+        XCTAssertFalse(manager.fileExists(atPath: filePath))
+    }
 }
