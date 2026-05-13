@@ -4,7 +4,7 @@ import PackageDescription
 
 // The Swift module is named `OursPrivacyKit` so consumers can `import
 // OursPrivacyKit` and reference the `OursPrivacy` class without the module
-// name shadowing the type. See the React Native parity plan for context.
+// name shadowing the type.
 let package = Package(
     name: "OursPrivacyKit",
     platforms: [

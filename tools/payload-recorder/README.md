@@ -2,7 +2,7 @@
 
 Tiny tools for capturing what the SDK posts to the ingest endpoint, and diffing those captures against a fixture file.
 
-Used as a dogfood loop for verifying parity with the React Native SDK's wire shape (`{eventName, eventProperties, userProperties, defaultProperties}`).
+Used as a dogfood loop for verifying the SDK's wire shape against the ingest endpoint's expected envelope (`{eventName, eventProperties, userProperties, defaultProperties}`).
 
 ## Capture
 

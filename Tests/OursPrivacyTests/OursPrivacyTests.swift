@@ -65,7 +65,8 @@ final class OursPrivacyTests: XCTestCase {
                                            eventProperties: ["k": "v"],
                                            userProperties: nil,
                                            context: makeContext())
-        // Legacy Mixpanel keys must not appear at any level of the payload.
+        // Legacy snake_case / dollar-prefixed keys must not appear at any level
+        // of the typed payload.
         let legacy = ["mp_lib", "$lib_version", "$mp_metadata", "$os", "$model",
                       "$device_id", "$user_id", "$had_persisted_distinct_id",
                       "userId", "token", "$duration"]
@@ -153,7 +154,7 @@ final class OursPrivacyTests: XCTestCase {
         XCTAssertEqual(up?["email"] as? String, "u@example.com")
     }
 
-    // MARK: - userProperties merge (web-cdp parity)
+    // MARK: - userProperties merge
 
     func testUserPropertiesMergeSpreadsCustomDefaultsUnderPerCall() {
         // defaults: { plan: 'pro' }; per-call: { tier: 'gold' } ⇒ merged
@@ -169,15 +170,15 @@ final class OursPrivacyTests: XCTestCase {
         XCTAssertEqual(custom?["tier"] as? String, "gold")
     }
 
-    func testUserPropertiesMergeOmitsConsentWhenBothSidesEmpty_OUR3669() {
-        // OUR-3669: if neither default-consent nor per-call consent has data,
-        // the `consent` key must be omitted entirely — emitting `consent: {}`
+    func testUserPropertiesMergeOmitsConsentWhenBothSidesEmpty() {
+        // If neither default-consent nor per-call consent has data, the
+        // `consent` key must be omitted entirely — emitting `consent: {}`
         // races with the CMP's $consent_init and overwrites real consent data.
         let merged = Track.mergeUserProperties(
             perCall: ["email": "u@example.com"],
             defaultCustom: ["plan": "pro"],
             defaultConsent: [:])
-        XCTAssertNil(merged?["consent"], "consent key must be omitted when both sides empty (OUR-3669)")
+        XCTAssertNil(merged?["consent"], "consent key must be omitted when both sides empty")
         XCTAssertEqual(merged?["email"] as? String, "u@example.com")
     }
 
@@ -220,7 +221,7 @@ final class OursPrivacyTests: XCTestCase {
         XCTAssertNotNil(p["version"])
         // device_type / os_name / os_version / screen_* depend on the host
         // platform; at minimum the cross-platform anchors must be present.
-        // Legacy Mixpanel keys must be absent.
+        // Legacy dollar-prefixed / snake_case keys must be absent.
         for legacy in ["$os", "$os_version", "$model", "$manufacturer", "mp_lib",
                        "$lib_version", "$screen_width", "$screen_height",
                        "$app_version_string", "$app_build_number"] {

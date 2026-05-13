@@ -45,9 +45,9 @@ public struct ProxyServerConfig {
 }
 
 /// The SDK entry point. Construct a single instance per project token and
-/// hold the reference for the lifetime of the app. The public surface
-/// mirrors the React Native SDK so cross-platform integrations share a
-/// vocabulary.
+/// hold the reference for the lifetime of the app. The public surface is
+/// aligned across the Ours Privacy SDKs so cross-platform integrations
+/// share a vocabulary.
 ///
 /// ```swift
 /// let op = OursPrivacy(token: "TOKEN", trackAutomaticEvents: true)
@@ -74,9 +74,6 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate 
     open internal(set) var isManuallySetId: Bool = false
 
     let oursprivacyPersistence: OursPrivacyPersistence
-
-    /// Show the network activity indicator while flushing. iOS-only.
-    open var showNetworkActivityIndicator = true
 
     /// Enables automatic-event tracking. Forwarded to `AutomaticEvents`.
     open var trackAutomaticEventsEnabled: Bool
@@ -351,19 +348,6 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate 
         if taskId != UIBackgroundTaskIdentifier.invalid {
             sharedApplication.endBackgroundTask(taskId)
             taskId = UIBackgroundTaskIdentifier.invalid
-#if os(iOS)
-            self.updateNetworkActivityIndicator(false)
-#endif
-        }
-    }
-#endif
-
-#if os(iOS)
-    func updateNetworkActivityIndicator(_ on: Bool) {
-        if showNetworkActivityIndicator {
-            DispatchQueue.main.async { [on] in
-                OursPrivacy.sharedUIApplication()?.isNetworkActivityIndicatorVisible = on
-            }
         }
     }
 #endif

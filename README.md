@@ -12,7 +12,6 @@ The official Ours Privacy SDK for iOS, tvOS, macOS, and watchOS, written in Swif
 - [Quick start](#quick-start)
 - [API reference](#api-reference)
 - [Payload structure](#payload-structure)
-- [Migration from 1.x](#migration-from-1x)
 - [FAQ](#faq)
 - [Development](#development)
 
@@ -267,25 +266,6 @@ Every event is sent to the `/ingest` endpoint inside a batch envelope:
 - `defaultProperties` — device metadata + marketing attribution (UTM params, click IDs).
 
 The SDK only sends `consent` when there's actual consent data on either the per-call argument or the store-level default — emitting `consent: {}` would race with a consent management platform's initialization signal.
-
-## Migration from 1.x
-
-The 2.0 surface is a hard break. The migration is small in practice:
-
-| 1.x | 2.x |
-| --- | --- |
-| `OursPrivacy.initialize(token: ..., trackAutomaticEvents: ...)` | `OursPrivacy(token: ..., trackAutomaticEvents: ...)` then `await op.initialize()` |
-| `OursPrivacy.mainInstance()` | Hold your own `OursPrivacy` reference (typically on `AppDelegate`) |
-| `OursPrivacy.getInstance(name:)`, `setMainInstance(name:)`, `removeInstance(name:)` | Construct multiple `OursPrivacy(...)` instances if you need them |
-| `identify(distinctId:, userProperties: [String: OursPrivacyType])` | `identify(OursPrivacyUserProperties(externalId: ..., ...))` |
-| `track(event:, properties:, userProperties: [String: OursPrivacyType])` | `track(event:, properties:, userProperties: OursPrivacyUserProperties)` |
-| `op.archive()` | Removed — the events queue is auto-persisted to `UserDefaults` |
-| `op.loggingEnabled = true` | `op.setLoggingEnabled(true)` (property setter still works for source compatibility) |
-| `Flush.useIPAddressForGeoLocation` | Removed |
-
-Events queued under 1.x are not migrated to the new persistence layer; they're dropped on first launch under 2.x.
-
-Platform minimums moved up: iOS 13 / tvOS 13 / macOS 10.15 / watchOS 6 (required for `async`/`await`).
 
 ## FAQ
 

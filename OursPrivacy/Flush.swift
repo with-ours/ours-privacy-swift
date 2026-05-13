@@ -11,10 +11,6 @@ protocol FlushDelegate: AnyObject {
     func flush(performFullFlush: Bool, completion: (() -> Void)?)
     func flushSuccess(type: FlushType, ids: [Int32])
     func flushEnvelopeContext() -> (token: String, isManuallySetId: Bool)
-
-#if os(iOS)
-    func updateNetworkActivityIndicator(_ on: Bool)
-#endif
 }
 
 class Flush: AppLifecycle {
@@ -131,20 +127,10 @@ class Flush: AppLifecycle {
                 continue
             }
 
-#if os(iOS)
-            if !OursPrivacy.isiOSAppExtension() {
-                delegate?.updateNetworkActivityIndicator(true)
-            }
-#endif
             let success = flushRequest.sendRequest(requestData,
                                                    type: type,
                                                    headers: headers,
                                                    queryItems: queryItems)
-#if os(iOS)
-            if !OursPrivacy.isiOSAppExtension() {
-                delegate?.updateNetworkActivityIndicator(false)
-            }
-#endif
             if success {
                 delegate?.flushSuccess(type: type, ids: ids)
                 mutableQueue.removeFirst(batchSize)
