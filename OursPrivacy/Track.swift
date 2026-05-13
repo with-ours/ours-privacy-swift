@@ -93,24 +93,16 @@ class Track {
         return item
     }
 
-    /// Builds the inner `data[]` element for an `identify()` call. Mirrors
-    /// `oursprivacy-main.js:212` — `event: "$identify"`, `eventProperties: null`,
-    /// `userProperties` carries the typed visitor profile with `external_id`
-    /// set from the caller's `distinctId`.
-    func composeIdentifyEvent(distinctId: String,
-                              userProperties: Properties?,
+    /// Builds the inner `data[]` element for an `identify()` call.
+    /// `event: "$identify"`, `eventProperties: null`, `userProperties`
+    /// carries the typed visitor profile. Callers set `external_id` on the
+    /// struct themselves when they want to stitch to an external system.
+    func composeIdentifyEvent(userProperties: Properties?,
                               context: EventContext) -> InternalProperties {
         assertPropertyTypes(userProperties)
 
-        var identifyUserProps: Properties = ["external_id": distinctId]
-        if let userProperties = userProperties {
-            for (k, v) in userProperties {
-                identifyUserProps[k] = v
-            }
-        }
-
         let merged = Track.mergeUserProperties(
-            perCall: identifyUserProps,
+            perCall: userProperties,
             defaultCustom: context.userCustomProperties,
             defaultConsent: context.userConsentProperties
         )

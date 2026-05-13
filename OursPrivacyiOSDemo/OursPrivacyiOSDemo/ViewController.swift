@@ -33,10 +33,10 @@ class ViewController: UIViewController {
         op.updateDefaultEventProperties(["app_section": "demo"])
         op.updateDefaultUserCustomProperties(["tier": "demo"])
 
-        op.identify(distinctId: externalId,
-                    userProperties: OursPrivacyUserProperties(email: "someone@example.com",
-                                                              firstName: "Demo",
-                                                              lastName: "User"))
+        op.identify(OursPrivacyUserProperties(email: "someone@example.com",
+                                              externalId: externalId,
+                                              firstName: "Demo",
+                                              lastName: "User"))
         op.track(event: "Started")
         op.flush()
 

@@ -59,9 +59,9 @@ Once you know who the visitor is — typically after sign-in — call `identify`
 
 ```swift
 oursPrivacy.identify(
-    distinctId: "user-123",
-    userProperties: OursPrivacyUserProperties(
+    OursPrivacyUserProperties(
         email: "user@example.com",
+        externalId: "user-123",
         firstName: "Ada",
         lastName: "Lovelace"
     )
@@ -91,8 +91,7 @@ init(token: String, trackAutomaticEvents: Bool, proxyServerConfig: ProxyServerCo
 Hold a single `OursPrivacy` instance for the lifetime of your app — typically on `AppDelegate`. `trackAutomaticEvents` controls whether the SDK records session and first-launch events automatically (ignored on watchOS / macOS where automatic events aren't supported).
 
 ```swift
-func initialize(optOutTrackingDefault: Bool = false,
-                options: OursPrivacyInitOptions? = nil) async
+func initialize(options: OursPrivacyInitOptions? = nil) async
 ```
 
 Applies boot-time options and starts the flush timer. Call once, immediately after construction. Safe to skip if you have no options to set, but the flush timer won't start until you do.
@@ -105,6 +104,7 @@ public struct OursPrivacyInitOptions {
     public var defaultEventProperties: [String: OursPrivacyType]?
     public var defaultUserCustomProperties: [String: OursPrivacyType]?
     public var defaultUserConsentProperties: [String: OursPrivacyType]?
+    public var optedOutByDefault: Bool?
 }
 ```
 
@@ -112,16 +112,16 @@ public struct OursPrivacyInitOptions {
 - `visitorId` — pin a host-supplied visitor ID at boot (equivalent to calling `setVisitorId(_:)`).
 - `initialURL` — parse a URL for attribution at boot (equivalent to calling `trackDeepLink(_:)`).
 - `defaultEventProperties`, `defaultUserCustomProperties`, `defaultUserConsentProperties` — seed the store-level default property bags.
+- `optedOutByDefault` — opt the visitor out on first launch. Ignored if a prior opt-in / opt-out decision is already persisted.
 
 ### Identity
 
 ```swift
-func identify(distinctId: String,
-              userProperties: OursPrivacyUserProperties? = nil,
+func identify(_ userProperties: OursPrivacyUserProperties? = nil,
               completion: (() -> Void)? = nil)
 ```
 
-Identify the current visitor. `external_id` is automatically populated from `distinctId`. `userProperties` is the typed visitor profile:
+Identify the current visitor. To stitch the visitor to an external system, set `externalId` on the `OursPrivacyUserProperties` struct — it serializes as `external_id` on the wire.
 
 ```swift
 public struct OursPrivacyUserProperties {
@@ -199,11 +199,12 @@ public struct AttributionResult: Equatable {
 
 ```swift
 func optOutTracking()
-func optInTracking(distinctId: String? = nil, properties: Properties? = nil)
+func optInTracking(userProperties: OursPrivacyUserProperties? = nil,
+                   properties: Properties? = nil)
 func hasOptedOutTracking() -> Bool
 ```
 
-`optOutTracking()` stops all tracking, regenerates the visitor ID, and clears the local event queue. `optInTracking()` re-enables tracking and fires a `$opt_in` event; if a `distinctId` is supplied it identifies the visitor in the same flow.
+`optOutTracking()` stops all tracking, regenerates the visitor ID, and clears the local event queue. `optInTracking()` re-enables tracking and fires a `$opt_in` event; if `userProperties` are supplied it identifies the visitor in the same flow.
 
 ### Flush + logging
 
@@ -261,7 +262,7 @@ The 2.0 surface is a hard break. The migration is small in practice:
 | `OursPrivacy.initialize(token: ..., trackAutomaticEvents: ...)` | `OursPrivacy(token: ..., trackAutomaticEvents: ...)` then `await op.initialize()` |
 | `OursPrivacy.mainInstance()` | Hold your own `OursPrivacy` reference (typically on `AppDelegate`) |
 | `OursPrivacy.getInstance(name:)`, `setMainInstance(name:)`, `removeInstance(name:)` | Construct multiple `OursPrivacy(...)` instances if you need them |
-| `identify(distinctId:, userProperties: [String: OursPrivacyType])` | `identify(distinctId:, userProperties: OursPrivacyUserProperties)` |
+| `identify(distinctId:, userProperties: [String: OursPrivacyType])` | `identify(OursPrivacyUserProperties(externalId: ..., ...))` |
 | `track(event:, properties:, userProperties: [String: OursPrivacyType])` | `track(event:, properties:, userProperties: OursPrivacyUserProperties)` |
 | `op.archive()` | Removed — the events queue is auto-persisted to `UserDefaults` |
 | `op.loggingEnabled = true` | `op.setLoggingEnabled(true)` (property setter still works for source compatibility) |

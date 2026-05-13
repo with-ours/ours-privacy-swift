@@ -52,8 +52,8 @@ public struct ProxyServerConfig {
 /// ```swift
 /// let op = OursPrivacy(token: "TOKEN", trackAutomaticEvents: true)
 /// await op.initialize()
-/// op.identify(distinctId: "user-123",
-///             userProperties: OursPrivacyUserProperties(email: "u@example.com"))
+/// op.identify(OursPrivacyUserProperties(email: "u@example.com",
+///                                       externalId: "user-123"))
 /// op.track(event: "Sign Up")
 /// ```
 open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate {
@@ -172,7 +172,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate 
 #endif
 
     /// Construct a new SDK instance bound to `token`. Call
-    /// ``initialize(optOutTrackingDefault:options:)`` immediately after to
+    /// ``initialize(options:)`` immediately after to
     /// apply boot-time options and start the flush timer.
     ///
     /// `trackAutomaticEvents` is ignored on watchOS / macOS where automatic
@@ -190,7 +190,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate 
 
     /// Construct a new SDK instance bound to `token` with a custom proxy
     /// configuration. Call
-    /// ``initialize(optOutTrackingDefault:options:)`` immediately after.
+    /// ``initialize(options:)`` immediately after.
     public convenience init(token: String, trackAutomaticEvents: Bool, proxyServerConfig: ProxyServerConfig) {
         self.init(apiToken: token,
                   flushInterval: 60,
@@ -235,7 +235,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate 
             flushInstance.flushInterval = flushInterval
         } else {
             // Set the interval without triggering the timer; the host kicks
-            // it off via ``initialize(optOutTrackingDefault:options:)``.
+            // it off via ``initialize(options:)``.
             flushInstance._flushInterval = flushInterval
         }
 
@@ -424,14 +424,13 @@ extension OursPrivacy {
     /// Apply boot-time options and start the flush timer. Call once,
     /// immediately after construction, before any `identify` / `track` call.
     ///
-    /// `optOutTrackingDefault` opts the visitor out on first launch unless
-    /// a persisted opt-in / opt-out decision already exists.
-    ///
     /// `options` carries optional overrides: server URL, manually-set
-    /// visitor ID, deep-link URL to parse for attribution at boot, and
-    /// default property bags merged into every subsequent event.
-    public func initialize(optOutTrackingDefault: Bool = false,
-                           options: OursPrivacyInitOptions? = nil) async {
+    /// visitor ID, deep-link URL to parse for attribution at boot, default
+    /// property bags merged into every subsequent event, and
+    /// ``OursPrivacyInitOptions/optedOutByDefault`` to opt the visitor out
+    /// on first launch (only when no persisted opt-in / opt-out decision
+    /// exists).
+    public func initialize(options: OursPrivacyInitOptions? = nil) async {
         if let serverURL = options?.serverURL {
             self.serverURL = serverURL
         }
@@ -450,7 +449,7 @@ extension OursPrivacy {
         if let initialURL = options?.initialURL, !initialURL.isEmpty {
             trackDeepLink(initialURL)
         }
-        if optOutTrackingDefault && optOutStatus == nil {
+        if options?.optedOutByDefault == true && optOutStatus == nil {
             optOutTracking()
         }
         // Kick the flush timer using whatever interval the host has set.
@@ -485,11 +484,11 @@ extension OursPrivacy {
         archive()
     }
 
-    /// Identify the current visitor with an external ID. Fires a single
-    /// `$identify` event carrying the visitor's typed user properties.
-    /// `external_id` is automatically populated from `distinctId`.
-    public func identify(distinctId: String,
-                         userProperties: OursPrivacyUserProperties? = nil,
+    /// Identify the current visitor. Fires a single `$identify` event
+    /// carrying the visitor's typed user properties. To stitch the visitor
+    /// to an external system, set ``OursPrivacyUserProperties/externalId``
+    /// on the struct — it serializes as `external_id` on the wire.
+    public func identify(_ userProperties: OursPrivacyUserProperties? = nil,
                          completion: (() -> Void)? = nil) {
         if hasOptedOutTracking() {
             if let completion = completion {
@@ -497,19 +496,11 @@ extension OursPrivacy {
             }
             return
         }
-        if distinctId.isEmpty {
-            OursPrivacyLogger.error(message: "\(self) cannot identify blank distinct id")
-            if let completion = completion {
-                DispatchQueue.main.async(execute: completion)
-            }
-            return
-        }
         let wireProps = userProperties?.toWireProperties()
-        trackingQueue.async { [weak self, distinctId, wireProps, completion] in
+        trackingQueue.async { [weak self, wireProps, completion] in
             guard let self = self else { return }
             let context = self.currentEventContext()
-            let item = self.trackInstance.composeIdentifyEvent(distinctId: distinctId,
-                                                               userProperties: wireProps,
+            let item = self.trackInstance.composeIdentifyEvent(userProperties: wireProps,
                                                                context: context)
             self.oursprivacyPersistence.saveEntity(item, type: .events)
             if let completion = completion {
@@ -768,9 +759,10 @@ extension OursPrivacy {
         }
     }
 
-    /// Re-enable tracking for an opted-out visitor and fire `$opt_in`. If a
-    /// `distinctId` is supplied, identify the visitor in the same flow.
-    public func optInTracking(distinctId: String? = nil, properties: Properties? = nil) {
+    /// Re-enable tracking for an opted-out visitor and fire `$opt_in`. If
+    /// `userProperties` is supplied, identify the visitor in the same flow.
+    public func optInTracking(userProperties: OursPrivacyUserProperties? = nil,
+                              properties: Properties? = nil) {
         trackingQueue.async { [weak self] in
             guard let self = self else { return }
             self.readWriteLock.write {
@@ -779,8 +771,8 @@ extension OursPrivacy {
             self.readWriteLock.read {
                 OursPrivacyPersistence.saveOptOutStatusFlag(value: self.optOutStatus!, instanceName: self.name)
             }
-            if let distinctId = distinctId {
-                self.identify(distinctId: distinctId, userProperties: nil)
+            if let userProperties = userProperties {
+                self.identify(userProperties)
             }
             self.track(event: "$opt_in", properties: properties)
         }
