@@ -62,6 +62,13 @@ class JSONHandler {
 
     private class func makeObjectSerializable(_ obj: MPObjectToParse) -> MPObjectToParse {
         switch obj {
+        case is NSNull:
+            // JSONSerialization renders NSNull as JSON `null`. Without this
+            // branch NSNull falls through to the default and gets stringified
+            // via `String(describing:)` to "<null>", which then ends up on the
+            // wire as a literal "<null>" string the server can't parse.
+            return obj
+
         case let obj as NSNumber:
             if isBoolNumber(obj) {
                 return obj.boolValue

@@ -9,7 +9,15 @@ Exits 0 on match, 1 on mismatch. Pretty-prints the offending paths.
 import json
 import sys
 
-VOLATILE_KEYS = {"time", "$time", "timestamp", "session_id"}
+VOLATILE_KEYS = {
+    # Timestamps (legacy)
+    "time", "$time", "timestamp", "session_id",
+    # Canonical identifiers — UUIDs minted per event / per install
+    "distinct_id", "visitor_id",
+    # Device fingerprint — varies by host. Presence is pinned by the schema;
+    # exact values don't matter for shape parity.
+    "os_version", "device_model", "screen_width", "screen_height",
+}
 
 
 def diff(a, b, path="$"):

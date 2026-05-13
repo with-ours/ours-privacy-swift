@@ -4,19 +4,17 @@
 //
 //  Copyright © 2025 Ours Wellness Inc.  All rights reserved.
 //
-//  Created by Yarden Eitan on 6/3/16.
-//  Copyright © 2016 Mixpanel. All rights reserved.
-//
 
 import Foundation
 
 protocol FlushDelegate: AnyObject {
     func flush(performFullFlush: Bool, completion: (() -> Void)?)
     func flushSuccess(type: FlushType, ids: [Int32])
-    
-    #if os(iOS)
+    func flushEnvelopeContext() -> (token: String, isManuallySetId: Bool)
+
+#if os(iOS)
     func updateNetworkActivityIndicator(_ on: Bool)
-    #endif // os(iOS)
+#endif
 }
 
 class Flush: AppLifecycle {
@@ -27,47 +25,37 @@ class Flush: AppLifecycle {
     var flushOnBackground = true
     var _flushInterval = 0.0
     var _flushBatchSize = APIConstants.maxBatchSize
-    private var _serverURL =  BasePath.DefaultAPIEndpoint
+    private var _serverURL = BasePath.DefaultAPIEndpoint
     private let flushRequestReadWriteLock: DispatchQueue
 
-    
     var serverURL: String {
         get {
-            flushRequestReadWriteLock.sync {
-                return _serverURL
-            }
+            flushRequestReadWriteLock.sync { _serverURL }
         }
         set {
-            flushRequestReadWriteLock.sync(flags: .barrier, execute: {
+            flushRequestReadWriteLock.sync(flags: .barrier) {
                 _serverURL = newValue
                 self.flushRequest.serverURL = newValue
-            })
-        }
-    }
-    
-    var flushInterval: Double {
-        get {
-            flushRequestReadWriteLock.sync {
-                return _flushInterval
             }
         }
-        set {
-            flushRequestReadWriteLock.sync(flags: .barrier, execute: {
-                _flushInterval = newValue
-            })
+    }
 
+    var flushInterval: Double {
+        get {
+            flushRequestReadWriteLock.sync { _flushInterval }
+        }
+        set {
+            flushRequestReadWriteLock.sync(flags: .barrier) {
+                _flushInterval = newValue
+            }
             delegate?.flush(performFullFlush: false, completion: nil)
             startFlushTimer()
         }
     }
-    
+
     var flushBatchSize: Int {
-        get {
-            return _flushBatchSize
-        }
-        set {
-            _flushBatchSize = newValue
-        }
+        get { _flushBatchSize }
+        set { _flushBatchSize = newValue }
     }
 
     required init(serverURL: String) {
@@ -86,10 +74,7 @@ class Flush: AppLifecycle {
     func startFlushTimer() {
         stopFlushTimer()
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else {
-                return
-            }
-
+            guard let self = self else { return }
             if self.flushInterval > 0 {
                 self.timer?.invalidate()
                 self.timer = Timer.scheduledTimer(timeInterval: self.flushInterval,
@@ -114,58 +99,61 @@ class Flush: AppLifecycle {
         }
     }
 
+    /// Drains the queue in `flushBatchSize` chunks. Each chunk becomes one
+    /// `/ingest` POST body of shape `{token, is_manually_set_id, data: [items]}`.
+    /// On success we delete the chunk's SQLite row IDs and continue; on failure
+    /// we stop so a retry can pick up where this attempt left off.
     func flushQueueInBatches(_ queue: Queue, type: FlushType, headers: [String: String], queryItems: [URLQueryItem]) {
+        guard let context = delegate?.flushEnvelopeContext() else { return }
+
         var mutableQueue = queue
         while !mutableQueue.isEmpty {
-            let batchSize = 1 //min(mutableQueue.count, flushBatchSize)
-//            let range = 0..<1 //batchSize
-            let batch = mutableQueue[0] // Array(mutableQueue[range])
-//            let ids: [Int32] = batch.map { entity in
-//                (entity["id"] as? Int32) ?? 0
-//            }
-            let id = batch["id"] as? Int32 ?? 0
-            // Log data payload sent
-//            OursPrivacyLogger.debug(message: "Sending batch of data")
-//            OursPrivacyLogger.debug(message: batch as Any)
-            let requestData = JSONHandler.encodeAPIData(batch)
-            if let requestData = requestData {
-                #if os(iOS)
-                    if !OursPrivacyInstance.isiOSAppExtension() {
-                        delegate?.updateNetworkActivityIndicator(true)
-                    }
-                #endif // os(iOS)
-                let success = flushRequest.sendRequest(requestData,
-                                                       type: type,
-                                                       useIP: useIPAddressForGeoLocation,
-                                                       headers: headers,
-                                                       queryItems: queryItems)
-                #if os(iOS)
-                if !OursPrivacyInstance.isiOSAppExtension() {
-                    delegate?.updateNetworkActivityIndicator(false)
-                }
-                #endif // os(iOS)
-                if success {
-                    // remove
-                    delegate?.flushSuccess(type: type, ids: [id])
-                    mutableQueue = self.removeProcessedBatch(batchSize: batchSize,
-                                                                queue: mutableQueue,
-                                                                type: type)
-                } else {
-                    break
-                }
+            let batchSize = min(mutableQueue.count, flushBatchSize)
+            let batch = Array(mutableQueue.prefix(batchSize))
+            let ids: [Int32] = batch.compactMap { $0["id"] as? Int32 }
+
+            // Strip the SQLite `id` column from each item — it's local state, not
+            // part of the wire schema.
+            let items = batch.map { row -> InternalProperties in
+                var copy = row
+                copy.removeValue(forKey: "id")
+                return copy
+            }
+
+            let envelope: InternalProperties = [
+                "token": context.token,
+                "is_manually_set_id": context.isManuallySetId,
+                "data": items,
+            ]
+
+            guard let requestData = JSONHandler.encodeAPIData(envelope) else {
+                OursPrivacyLogger.warn(message: "flush dropped a batch: envelope failed to serialize")
+                mutableQueue.removeFirst(batchSize)
+                continue
+            }
+
+#if os(iOS)
+            if !OursPrivacyInstance.isiOSAppExtension() {
+                delegate?.updateNetworkActivityIndicator(true)
+            }
+#endif
+            let success = flushRequest.sendRequest(requestData,
+                                                   type: type,
+                                                   useIP: useIPAddressForGeoLocation,
+                                                   headers: headers,
+                                                   queryItems: queryItems)
+#if os(iOS)
+            if !OursPrivacyInstance.isiOSAppExtension() {
+                delegate?.updateNetworkActivityIndicator(false)
+            }
+#endif
+            if success {
+                delegate?.flushSuccess(type: type, ids: ids)
+                mutableQueue.removeFirst(batchSize)
+            } else {
+                break
             }
         }
-    }
-    
-    func removeProcessedBatch(batchSize: Int, queue: Queue, type: FlushType) -> Queue {
-        var shadowQueue = queue
-        let range = 0..<batchSize
-        if let lastIndex = range.last, shadowQueue.count - 1 > lastIndex {
-            shadowQueue.removeSubrange(range)
-        } else {
-            shadowQueue.removeAll()
-        }
-        return shadowQueue
     }
 
     // MARK: - Lifecycle
@@ -176,6 +164,4 @@ class Flush: AppLifecycle {
     func applicationWillResignActive() {
         stopFlushTimer()
     }
-
 }
-

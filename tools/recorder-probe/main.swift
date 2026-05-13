@@ -42,6 +42,13 @@ op.track(event: "Probe Event With Many Props", properties: [
     "bool_prop": false,
 ])
 
+// Exercise the per-call userProperties parameter — pinned by `formatUserProperties`
+// in martech/apps/web-cdp/src/lib/format-track.ts.
+op.track(event: "Probe Event With User Props", properties: ["source": "probe"], userProperties: [
+    "email": "probe-track@example.com",
+    "custom_properties": ["tier": "gold"],
+])
+
 print("[probe] flushing...")
 let flushed = expectation()
 op.flush(performFullFlush: true) {
