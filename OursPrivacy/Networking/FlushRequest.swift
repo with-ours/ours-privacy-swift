@@ -23,7 +23,6 @@ class FlushRequest: Network {
 
     func sendRequest(_ requestData: String,
                      type: FlushType,
-                     useIP: Bool,
                      headers: [String: String],
                      queryItems: [URLQueryItem] = []) -> Bool {
         

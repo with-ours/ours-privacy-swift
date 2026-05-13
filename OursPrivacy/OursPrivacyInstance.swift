@@ -2,7 +2,7 @@
 //  OursPrivacyInstance.swift
 //  OursPrivacy
 //
-//  Copyright © 2025 Ours Wellness Inc.  All rights reserved.
+//  Copyright © 2026 Ours Wellness Inc. All rights reserved.
 //
 
 import Foundation
@@ -12,16 +12,16 @@ import UIKit
 import Cocoa
 #endif
 
-/// Delegate for proxy-server resource resolution. Same surface as before; the SDK
-/// asks the host for headers / query items per request when a proxy is configured.
+/// Delegate for proxy-server resource resolution. The SDK asks the host for
+/// headers / query items per request when a proxy is configured.
 public protocol OursPrivacyProxyServerDelegate: AnyObject {
     func oursprivacyResourceForProxyServer(_ name: String) -> ServerProxyResource?
 }
 
-/// Delegate that can veto a flush attempt. Useful for hosts that gate network
-/// activity on radio state, foreground/background, etc.
+/// Delegate that can veto a flush attempt. Useful for hosts that gate
+/// network activity on radio state, foreground/background, etc.
 public protocol OursPrivacyDelegate: AnyObject {
-    func oursprivacyWillFlush(_ oursprivacy: OursPrivacyInstance) -> Bool
+    func oursprivacyWillFlush(_ oursprivacy: OursPrivacy) -> Bool
 }
 
 public typealias Properties = [String: OursPrivacyType]
@@ -44,25 +44,34 @@ public struct ProxyServerConfig {
     let delegate: OursPrivacyProxyServerDelegate?
 }
 
-/// The class that represents the OursPrivacy instance. Public API is the
-/// stable surface customer apps call against — `identify`, `track`, `flush`,
-/// `reset`, opt-in/out. Internal wire-shape composition lives in `Track`.
-open class OursPrivacyInstance: CustomDebugStringConvertible, FlushDelegate, AEDelegate {
+/// The SDK entry point. Construct a single instance per project token and
+/// hold the reference for the lifetime of the app. The public surface
+/// mirrors the React Native SDK so cross-platform integrations share a
+/// vocabulary.
+///
+/// ```swift
+/// let op = OursPrivacy(token: "TOKEN", trackAutomaticEvents: true)
+/// await op.initialize()
+/// op.identify(distinctId: "user-123",
+///             userProperties: OursPrivacyUserProperties(email: "u@example.com"))
+/// op.track(event: "Sign Up")
+/// ```
+open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate {
 
-    /// The project token. Set once via `OursPrivacy.initialize(...)`.
+    /// The project token. Set at construction.
     open var apiToken = ""
 
     /// Optional delegate that can veto a flush attempt.
     open weak var delegate: OursPrivacyDelegate?
 
-    /// Stable per-install identifier sent as `visitor_id` on every event. Generated
-    /// lazily on first launch and persisted in NSUserDefaults under the OursPrivacy
-    /// suite. Reset by `reset()`.
-    open var visitorId: String = ""
+    /// Stable per-install identifier sent as `visitor_id` on every event.
+    /// Generated lazily on first launch and persisted in NSUserDefaults
+    /// under the OursPrivacy suite. Reset by ``reset(completion:)``.
+    open internal(set) var visitorId: String = ""
 
-    /// True only when the host explicitly called `setVisitorId(...)` (Pass B).
+    /// True only when the host explicitly called ``setVisitorId(_:)``.
     /// Forwarded as the top-level `is_manually_set_id` envelope field.
-    open var isManuallySetId: Bool = false
+    open internal(set) var isManuallySetId: Bool = false
 
     let oursprivacyPersistence: OursPrivacyPersistence
 
@@ -72,8 +81,8 @@ open class OursPrivacyInstance: CustomDebugStringConvertible, FlushDelegate, AED
     /// Enables automatic-event tracking. Forwarded to `AutomaticEvents`.
     open var trackAutomaticEventsEnabled: Bool
 
-    /// Flush timer interval (seconds). 0 disables auto-flush; the host calls
-    /// `flush()` manually.
+    /// Flush timer interval (seconds). 0 disables auto-flush; the host
+    /// calls ``flush(performFullFlush:completion:)`` manually.
     open var flushInterval: Double {
         get { flushInstance.flushInterval }
         set { flushInstance.flushInterval = newValue }
@@ -106,7 +115,8 @@ open class OursPrivacyInstance: CustomDebugStringConvertible, FlushDelegate, AED
             + ")"
     }
 
-    /// Toggles SDK logging at runtime. Off by default — flip on while debugging.
+    /// Toggles SDK logging at runtime. Off by default. Prefer
+    /// ``setLoggingEnabled(_:)`` for the method-style API.
     open var loggingEnabled: Bool = false {
         didSet {
             if loggingEnabled {
@@ -125,7 +135,8 @@ open class OursPrivacyInstance: CustomDebugStringConvertible, FlushDelegate, AED
         }
     }
 
-    /// Unique name for this instance. Defaults to the token. Allows multi-token apps.
+    /// Instance name (defaults to the API token). Identifies the
+    /// per-token NSUserDefaults suite used for persistence.
     public let name: String
 
 #if os(iOS) || os(tvOS) || os(visionOS)
@@ -140,10 +151,7 @@ open class OursPrivacyInstance: CustomDebugStringConvertible, FlushDelegate, AED
     }
 #endif
 
-    // Default-properties bags. Populated by the Pass B setters
-    // (`updateDefaultEventProperties` / `…UserCustomProperties` /
-    // `…UserConsentProperties` / `trackDeepLink`). Empty for now — the composer
-    // reads them on every event with no conditional branch.
+    // Default-properties bags. Populated by the public setters below.
     var defaultEventProperties: InternalProperties = [:]
     var userCustomProperties: InternalProperties = [:]
     var userConsentProperties: InternalProperties = [:]
@@ -163,34 +171,35 @@ open class OursPrivacyInstance: CustomDebugStringConvertible, FlushDelegate, AED
     let automaticEvents = AutomaticEvents()
 #endif
 
-    convenience init(apiToken: String?,
-                     flushInterval: Double,
-                     name: String,
-                     trackAutomaticEvents: Bool,
-                     optOutTrackingByDefault: Bool = false,
-                     proxyServerConfig: ProxyServerConfig) {
-        self.init(apiToken: apiToken,
-                  flushInterval: flushInterval,
-                  name: name,
+    /// Construct a new SDK instance bound to `token`. Call
+    /// ``initialize(optOutTrackingDefault:options:)`` immediately after to
+    /// apply boot-time options and start the flush timer.
+    ///
+    /// `trackAutomaticEvents` is ignored on watchOS / macOS where automatic
+    /// events aren't supported.
+    public convenience init(token: String, trackAutomaticEvents: Bool) {
+        self.init(apiToken: token,
+                  flushInterval: 60,
+                  name: token,
                   trackAutomaticEvents: trackAutomaticEvents,
-                  optOutTrackingByDefault: optOutTrackingByDefault,
-                  serverURL: proxyServerConfig.serverUrl,
-                  proxyServerDelegate: proxyServerConfig.delegate)
+                  optOutTrackingByDefault: false,
+                  serverURL: nil,
+                  proxyServerDelegate: nil,
+                  startFlushTimer: false)
     }
 
-    convenience init(apiToken: String?,
-                     flushInterval: Double,
-                     name: String,
-                     trackAutomaticEvents: Bool,
-                     optOutTrackingByDefault: Bool = false,
-                     serverURL: String? = nil) {
-        self.init(apiToken: apiToken,
-                  flushInterval: flushInterval,
-                  name: name,
+    /// Construct a new SDK instance bound to `token` with a custom proxy
+    /// configuration. Call
+    /// ``initialize(optOutTrackingDefault:options:)`` immediately after.
+    public convenience init(token: String, trackAutomaticEvents: Bool, proxyServerConfig: ProxyServerConfig) {
+        self.init(apiToken: token,
+                  flushInterval: 60,
+                  name: token,
                   trackAutomaticEvents: trackAutomaticEvents,
-                  optOutTrackingByDefault: optOutTrackingByDefault,
-                  serverURL: serverURL,
-                  proxyServerDelegate: nil)
+                  optOutTrackingByDefault: false,
+                  serverURL: proxyServerConfig.serverUrl,
+                  proxyServerDelegate: proxyServerConfig.delegate,
+                  startFlushTimer: false)
     }
 
     private init(apiToken: String?,
@@ -199,7 +208,8 @@ open class OursPrivacyInstance: CustomDebugStringConvertible, FlushDelegate, AED
                  trackAutomaticEvents: Bool,
                  optOutTrackingByDefault: Bool = false,
                  serverURL: String? = nil,
-                 proxyServerDelegate: OursPrivacyProxyServerDelegate? = nil) {
+                 proxyServerDelegate: OursPrivacyProxyServerDelegate? = nil,
+                 startFlushTimer: Bool = true) {
         if let apiToken = apiToken, !apiToken.isEmpty {
             self.apiToken = apiToken
         }
@@ -221,7 +231,13 @@ open class OursPrivacyInstance: CustomDebugStringConvertible, FlushDelegate, AED
         trackInstance = Track()
         trackInstance.oursprivacyInstance = self
         flushInstance.delegate = self
-        flushInstance.flushInterval = flushInterval
+        if startFlushTimer {
+            flushInstance.flushInterval = flushInterval
+        } else {
+            // Set the interval without triggering the timer; the host kicks
+            // it off via ``initialize(optOutTrackingDefault:options:)``.
+            flushInstance._flushInterval = flushInterval
+        }
 
 #if !os(watchOS)
         setupListeners()
@@ -233,7 +249,7 @@ open class OursPrivacyInstance: CustomDebugStringConvertible, FlushDelegate, AED
         }
 
 #if os(iOS) || os(tvOS) || os(visionOS)
-        if !OursPrivacyInstance.isiOSAppExtension() && trackAutomaticEvents {
+        if !OursPrivacy.isiOSAppExtension() && trackAutomaticEvents {
             automaticEvents.delegate = self
             automaticEvents.initializeEvents(instanceName: self.name)
         }
@@ -243,7 +259,7 @@ open class OursPrivacyInstance: CustomDebugStringConvertible, FlushDelegate, AED
 #if !os(OSX) && !os(watchOS)
     private func setupListeners() {
         let notificationCenter = NotificationCenter.default
-        if !OursPrivacyInstance.isiOSAppExtension() {
+        if !OursPrivacy.isiOSAppExtension() {
             notificationCenter.addObserver(self,
                                            selector: #selector(applicationWillResignActive(_:)),
                                            name: UIApplication.willResignActiveNotification,
@@ -309,7 +325,7 @@ open class OursPrivacyInstance: CustomDebugStringConvertible, FlushDelegate, AED
 
 #if !os(OSX) && !os(watchOS)
     @objc private func applicationDidEnterBackground(_ notification: Notification) {
-        guard let sharedApplication = OursPrivacyInstance.sharedUIApplication() else {
+        guard let sharedApplication = OursPrivacy.sharedUIApplication() else {
             return
         }
         if hasOptedOutTracking() {
@@ -329,7 +345,7 @@ open class OursPrivacyInstance: CustomDebugStringConvertible, FlushDelegate, AED
     }
 
     @objc private func applicationWillEnterForeground(_ notification: Notification) {
-        guard let sharedApplication = OursPrivacyInstance.sharedUIApplication() else {
+        guard let sharedApplication = OursPrivacy.sharedUIApplication() else {
             return
         }
         if taskId != UIBackgroundTaskIdentifier.invalid {
@@ -346,7 +362,7 @@ open class OursPrivacyInstance: CustomDebugStringConvertible, FlushDelegate, AED
     func updateNetworkActivityIndicator(_ on: Bool) {
         if showNetworkActivityIndicator {
             DispatchQueue.main.async { [on] in
-                OursPrivacyInstance.sharedUIApplication()?.isNetworkActivityIndicatorVisible = on
+                OursPrivacy.sharedUIApplication()?.isNetworkActivityIndicatorVisible = on
             }
         }
     }
@@ -375,76 +391,8 @@ open class OursPrivacyInstance: CustomDebugStringConvertible, FlushDelegate, AED
                             userConsentProperties: consentSnapshot,
                             attributionDefaultProperties: attributionSnapshot)
     }
-}
 
-extension OursPrivacyInstance {
-    // MARK: - Identity
-
-    /// Identifies the current visitor with an external ID. Equivalent to RN's
-    /// `identify(externalId, userProperties)` (see `oursprivacy-main.js:185`).
-    ///
-    /// Fires a single `$identify` event through the canonical wire shape with
-    /// `userProperties.external_id = distinctId` merged in alongside any
-    /// caller-provided typed user properties.
-    public func identify(distinctId: String, userProperties: Properties?, completion: (() -> Void)? = nil) {
-        if hasOptedOutTracking() {
-            if let completion = completion {
-                DispatchQueue.main.async(execute: completion)
-            }
-            return
-        }
-        if distinctId.isEmpty {
-            OursPrivacyLogger.error(message: "\(self) cannot identify blank distinct id")
-            if let completion = completion {
-                DispatchQueue.main.async(execute: completion)
-            }
-            return
-        }
-        trackingQueue.async { [weak self, distinctId, userProperties, completion] in
-            guard let self = self else { return }
-            let context = self.currentEventContext()
-            let item = self.trackInstance.composeIdentifyEvent(distinctId: distinctId,
-                                                               userProperties: userProperties,
-                                                               context: context)
-            self.oursprivacyPersistence.saveEntity(item, type: .events)
-            if let completion = completion {
-                DispatchQueue.main.async(execute: completion)
-            }
-        }
-
-        if OursPrivacyInstance.isiOSAppExtension() {
-            flush()
-        }
-    }
-
-    /// Clears the visitor identity, the typed user bags, and the local event
-    /// queue. The next track call gets a fresh `visitor_id`.
-    public func reset(completion: (() -> Void)? = nil) {
-        flush()
-        trackingQueue.async { [weak self] in
-            guard let self = self else { return }
-            OursPrivacyPersistence.deleteUserDefaultsData(instanceName: self.name)
-            self.readWriteLock.write {
-                self.visitorId = self.newVisitorId()
-                self.isManuallySetId = false
-                self.defaultEventProperties = [:]
-                self.userCustomProperties = [:]
-                self.userConsentProperties = [:]
-                self.attributionDefaultProperties = [:]
-            }
-            self.oursprivacyPersistence.resetEntities()
-            self.archive()
-            if let completion = completion {
-                DispatchQueue.main.async(execute: completion)
-            }
-        }
-    }
-}
-
-extension OursPrivacyInstance {
-    // MARK: - Persistence
-
-    public func archive() {
+    func archive() {
         readWriteLock.read {
             OursPrivacyPersistence.saveIdentity(
                 OursPrivacyIdentity(visitorId: visitorId, isManuallySetId: isManuallySetId),
@@ -470,11 +418,221 @@ extension OursPrivacyInstance {
     }
 }
 
-extension OursPrivacyInstance {
+extension OursPrivacy {
+    // MARK: - Boot
+
+    /// Apply boot-time options and start the flush timer. Call once,
+    /// immediately after construction, before any `identify` / `track` call.
+    ///
+    /// `optOutTrackingDefault` opts the visitor out on first launch unless
+    /// a persisted opt-in / opt-out decision already exists.
+    ///
+    /// `options` carries optional overrides: server URL, manually-set
+    /// visitor ID, deep-link URL to parse for attribution at boot, and
+    /// default property bags merged into every subsequent event.
+    public func initialize(optOutTrackingDefault: Bool = false,
+                           options: OursPrivacyInitOptions? = nil) async {
+        if let serverURL = options?.serverURL {
+            self.serverURL = serverURL
+        }
+        if let visitorId = options?.visitorId, !visitorId.isEmpty {
+            setVisitorId(visitorId)
+        }
+        if let defaults = options?.defaultEventProperties {
+            updateDefaultEventProperties(defaults)
+        }
+        if let defaults = options?.defaultUserCustomProperties {
+            updateDefaultUserCustomProperties(defaults)
+        }
+        if let defaults = options?.defaultUserConsentProperties {
+            updateDefaultUserConsentProperties(defaults)
+        }
+        if let initialURL = options?.initialURL, !initialURL.isEmpty {
+            trackDeepLink(initialURL)
+        }
+        if optOutTrackingDefault && optOutStatus == nil {
+            optOutTracking()
+        }
+        // Kick the flush timer using whatever interval the host has set.
+        flushInstance.flushInterval = flushInstance.flushInterval
+    }
+}
+
+extension OursPrivacy {
+    // MARK: - Identity
+
+    /// Returns the current visitor ID, or `nil` if the SDK hasn't generated
+    /// one yet (the typical case is before the first `identify` / `track`).
+    public func getVisitorId() -> String? {
+        var current = ""
+        readWriteLock.read { current = visitorId }
+        return current.isEmpty ? nil : current
+    }
+
+    /// Override the visitor ID with a host-supplied value. Flips
+    /// ``isManuallySetId`` to true so the envelope's `is_manually_set_id`
+    /// flag tells the server this visitor came from a stitched identity
+    /// (e.g. a web → app deep link).
+    public func setVisitorId(_ visitorId: String) {
+        guard !visitorId.isEmpty else {
+            OursPrivacyLogger.error(message: "setVisitorId called with empty string — ignoring")
+            return
+        }
+        readWriteLock.write {
+            self.visitorId = visitorId
+            self.isManuallySetId = true
+        }
+        archive()
+    }
+
+    /// Identify the current visitor with an external ID. Fires a single
+    /// `$identify` event carrying the visitor's typed user properties.
+    /// `external_id` is automatically populated from `distinctId`.
+    public func identify(distinctId: String,
+                         userProperties: OursPrivacyUserProperties? = nil,
+                         completion: (() -> Void)? = nil) {
+        if hasOptedOutTracking() {
+            if let completion = completion {
+                DispatchQueue.main.async(execute: completion)
+            }
+            return
+        }
+        if distinctId.isEmpty {
+            OursPrivacyLogger.error(message: "\(self) cannot identify blank distinct id")
+            if let completion = completion {
+                DispatchQueue.main.async(execute: completion)
+            }
+            return
+        }
+        let wireProps = userProperties?.toWireProperties()
+        trackingQueue.async { [weak self, distinctId, wireProps, completion] in
+            guard let self = self else { return }
+            let context = self.currentEventContext()
+            let item = self.trackInstance.composeIdentifyEvent(distinctId: distinctId,
+                                                               userProperties: wireProps,
+                                                               context: context)
+            self.oursprivacyPersistence.saveEntity(item, type: .events)
+            if let completion = completion {
+                DispatchQueue.main.async(execute: completion)
+            }
+        }
+
+        if OursPrivacy.isiOSAppExtension() {
+            flush()
+        }
+    }
+
+    /// Clears the visitor identity, the typed user bags, and the local
+    /// event queue. The next event gets a fresh `visitor_id`.
+    public func reset(completion: (() -> Void)? = nil) {
+        flush()
+        trackingQueue.async { [weak self] in
+            guard let self = self else { return }
+            OursPrivacyPersistence.deleteUserDefaultsData(instanceName: self.name)
+            self.readWriteLock.write {
+                self.visitorId = self.newVisitorId()
+                self.isManuallySetId = false
+                self.defaultEventProperties = [:]
+                self.userCustomProperties = [:]
+                self.userConsentProperties = [:]
+                self.attributionDefaultProperties = [:]
+            }
+            self.oursprivacyPersistence.resetEntities()
+            self.archive()
+            if let completion = completion {
+                DispatchQueue.main.async(execute: completion)
+            }
+        }
+    }
+}
+
+extension OursPrivacy {
+    // MARK: - Default properties
+
+    /// Merge `properties` into the store-level default event properties.
+    /// Subsequent `track` calls receive these keys on every event under
+    /// `eventProperties` (per-call values win on collision).
+    public func updateDefaultEventProperties(_ properties: [String: OursPrivacyType]) {
+        readWriteLock.write {
+            for (k, v) in properties { defaultEventProperties[k] = v }
+        }
+    }
+
+    /// Merge `properties` into the store-level default
+    /// `userProperties.custom_properties`. Subsequent `identify` and
+    /// `track` calls carry these defaults under nested `custom_properties`.
+    public func updateDefaultUserCustomProperties(_ properties: [String: OursPrivacyType]) {
+        readWriteLock.write {
+            for (k, v) in properties { userCustomProperties[k] = v }
+        }
+    }
+
+    /// Merge `properties` into the store-level default
+    /// `userProperties.consent`. Subsequent `identify` and `track` calls
+    /// carry these defaults under nested `consent`.
+    public func updateDefaultUserConsentProperties(_ properties: [String: OursPrivacyType]) {
+        readWriteLock.write {
+            for (k, v) in properties { userConsentProperties[k] = v }
+        }
+    }
+
+    /// Method-style toggle for SDK logging. Equivalent to setting
+    /// ``loggingEnabled``.
+    public func setLoggingEnabled(_ enabled: Bool) {
+        loggingEnabled = enabled
+    }
+}
+
+extension OursPrivacy {
+    // MARK: - Deep links
+
+    /// Parse a deep-link URL for marketing attribution and record a
+    /// `$deep_link_opened` event with the raw URL.
+    ///
+    /// UTM parameters and ad-network click IDs are extracted and stored as
+    /// store-level attribution defaults — every subsequent event sends them
+    /// under `defaultProperties`. Calling `trackDeepLink` again **replaces**
+    /// the prior attribution (rather than merging) so stale UTM keys from
+    /// an earlier link don't leak into events triggered by a later one.
+    ///
+    /// If the URL carries an `ours_visitor_id` parameter, the SDK calls
+    /// ``setVisitorId(_:)`` so cross-platform sessions stitch to the same
+    /// visitor.
+    public func trackDeepLink(_ url: String) {
+        guard !url.isEmpty else {
+            OursPrivacyLogger.info(message: "trackDeepLink called with empty URL, skipping")
+            return
+        }
+        if hasOptedOutTracking() {
+            OursPrivacyLogger.info(message: "trackDeepLink skipped: visitor is opted out")
+            return
+        }
+
+        let attribution = parseAttributionFromURL(url)
+        if let stitched = attribution.oursVisitorId {
+            setVisitorId(stitched)
+        }
+        var combined: InternalProperties = [:]
+        if let utms = attribution.utmParams {
+            for (k, v) in utms { combined[k] = v }
+        }
+        if let clickIds = attribution.clickIds {
+            for (k, v) in clickIds { combined[k] = v }
+        }
+        readWriteLock.write {
+            attributionDefaultProperties = combined
+        }
+
+        track(event: "$deep_link_opened",
+              properties: ["url": attribution.rawURL])
+    }
+}
+
+extension OursPrivacy {
     // MARK: - Flush
 
-    /// Drains the local event queue to `/ingest`. The flush timer (`flushInterval`)
-    /// and the background hook also call this; the host rarely needs to.
+    /// Drains the local event queue to `/ingest`. The flush timer and the
+    /// background hook also call this; the host rarely needs to.
     public func flush(performFullFlush: Bool = false, completion: (() -> Void)? = nil) {
         if hasOptedOutTracking() {
             if let completion = completion {
@@ -541,14 +699,27 @@ extension OursPrivacyInstance {
     }
 }
 
-extension OursPrivacyInstance {
+extension OursPrivacy {
     // MARK: - Track
 
-    /// Records an event. `properties` becomes `eventProperties` on the wire
-    /// (after merging the store-level `defaultEventProperties`). `userProperties`
-    /// is per-call only — not sticky across subsequent tracks (server stitches
-    /// by `visitor_id`).
-    public func track(event: String?, properties: Properties? = nil, userProperties: Properties? = nil) {
+    /// Record an event. `properties` becomes `eventProperties` on the wire
+    /// (after merging the store-level default event properties).
+    /// `userProperties` is per-call only — not sticky across subsequent
+    /// tracks (server stitches by `visitor_id`).
+    public func track(event: String?,
+                      properties: Properties? = nil,
+                      userProperties: OursPrivacyUserProperties? = nil) {
+        trackUntyped(event: event,
+                     properties: properties,
+                     userProperties: userProperties?.toWireProperties())
+    }
+
+    /// Internal entry point used by AutomaticEvents and the typed
+    /// ``track(event:properties:userProperties:)`` overload. Accepts the
+    /// untyped per-call userProperties dict the composer consumes.
+    func trackUntyped(event: String?,
+                      properties: Properties? = nil,
+                      userProperties: Properties? = nil) {
         OursPrivacyLogger.debug(message: "Tracking \(event ?? "nil")")
         trackingQueue.async { [weak self, event, properties, userProperties] in
             guard let self = self else { return }
@@ -564,16 +735,17 @@ extension OursPrivacyInstance {
             self.oursprivacyPersistence.saveEntity(item, type: .events)
         }
 
-        if OursPrivacyInstance.isiOSAppExtension() {
+        if OursPrivacy.isiOSAppExtension() {
             flush()
         }
     }
 }
 
-extension OursPrivacyInstance {
+extension OursPrivacy {
     // MARK: - Opt-out
 
-    /// Stops all tracking. Pending events are dropped; `visitor_id` is regenerated.
+    /// Stops all tracking. Pending events are dropped; `visitor_id` is
+    /// regenerated.
     public func optOutTracking() {
         trackingQueue.async { [weak self] in
             guard let self = self else { return }
@@ -595,8 +767,8 @@ extension OursPrivacyInstance {
         }
     }
 
-    /// Re-enables tracking for an opted-out visitor and fires `$opt_in`. If a
-    /// `distinctId` is supplied, identifies the visitor in the same flow.
+    /// Re-enable tracking for an opted-out visitor and fire `$opt_in`. If a
+    /// `distinctId` is supplied, identify the visitor in the same flow.
     public func optInTracking(distinctId: String? = nil, properties: Properties? = nil) {
         trackingQueue.async { [weak self] in
             guard let self = self else { return }
@@ -622,11 +794,16 @@ extension OursPrivacyInstance {
     }
 
     // MARK: - AEDelegate
+
+    func track(event: String?, properties: Properties?, userProperties: Properties?) {
+        trackUntyped(event: event, properties: properties, userProperties: userProperties)
+    }
+
     func increment(property: String, by: Double) {
-        // People profile increments are no longer supported — Wave 3.
+        // People profile increments are not supported.
     }
 
     func setOnce(properties: Properties) {
-        // People profile setOnce is no longer supported — Wave 3.
+        // People profile setOnce is not supported.
     }
 }

@@ -2,8 +2,6 @@
 //  AppDelegate.swift
 //  OursPrivacyiOSDemo
 //
-//  Created by Steve Krenek on 4/9/25.
-//
 
 import UIKit
 import OursPrivacyKit
@@ -11,32 +9,36 @@ import OursPrivacyKit
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
+    static var shared: AppDelegate {
+        UIApplication.shared.delegate as! AppDelegate
+    }
 
+    /// The single SDK instance the demo holds for the app's lifetime.
+    /// Constructed in `didFinishLaunching`; ``initialize(optOutTrackingDefault:options:)``
+    /// is awaited from a `Task` so the app delegate can stay sync.
+    var oursPrivacy: OursPrivacy?
 
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        let token = ProcessInfo.processInfo.environment["OURSPRIVACY_TOKEN"] ?? ""
         let serverURL = ProcessInfo.processInfo.environment["OURSPRIVACY_SERVER_URL"]
-        if let opToken = ProcessInfo.processInfo.environment["OURSPRIVACY_TOKEN"] {
-            OursPrivacy.initialize(token: opToken, trackAutomaticEvents: true, serverURL: serverURL)
-            OursPrivacy.mainInstance().loggingEnabled = true // Enable logging
-            OursPrivacy.mainInstance().flushInterval = 10.0 // Set auto-flush interval to 10 seconds.  (Defaults to never (0))
+
+        let op = OursPrivacy(token: token, trackAutomaticEvents: true)
+        oursPrivacy = op
+
+        Task {
+            await op.initialize(options: OursPrivacyInitOptions(serverURL: serverURL))
+            op.setLoggingEnabled(true)
+            op.flushInterval = 10.0
         }
         return true
     }
 
-    // MARK: UISceneSession Lifecycle
-
-    func application(_ application: UIApplication, configurationForConnecting connectingSceneSession: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
-        // Called when a new scene session is being created.
-        // Use this method to select a configuration to create the new scene with.
-        return UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
+    func application(_ application: UIApplication,
+                     configurationForConnecting connectingSceneSession: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
     }
 
-    func application(_ application: UIApplication, didDiscardSceneSessions sceneSessions: Set<UISceneSession>) {
-        // Called when the user discards a scene session.
-        // If any sessions were discarded while the application was not running, this will be called shortly after application:didFinishLaunchingWithOptions.
-        // Use this method to release any resources that were specific to the discarded scenes, as they will not return.
-    }
-
-
+    func application(_ application: UIApplication, didDiscardSceneSessions sceneSessions: Set<UISceneSession>) {}
 }
-
