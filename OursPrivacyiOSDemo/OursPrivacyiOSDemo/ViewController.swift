@@ -22,6 +22,7 @@ class ViewController: UIViewController {
         super.viewDidLoad()
         txtToken.text = op?.apiToken ?? ""
         appendResult("Demo loaded. Visitor: \(op?.getVisitorId() ?? "nil")")
+        appendResult("Opted out: \(op?.hasOptedOutTracking() == true)")
     }
 
     // MARK: - Identify + default properties

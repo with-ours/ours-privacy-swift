@@ -555,6 +555,38 @@ final class OursPrivacyTests: XCTestCase {
         XCTAssertEqual(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).count, 0)
     }
 
+    // MARK: - optedOutByDefault initialization option
+
+    func testOptedOutByDefaultTrueSkipsTrackingOnFirstLaunch() async {
+        let op = makeInstance()
+        await op.initialize(options: OursPrivacyInitOptions(optedOutByDefault: true))
+        XCTAssertTrue(op.hasOptedOutTracking())
+
+        op.track(event: "should-be-dropped")
+        op.trackingQueue.sync {}
+        XCTAssertEqual(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).count, 0)
+    }
+
+    func testOptedOutByDefaultFalseAllowsTracking() async {
+        let op = makeInstance()
+        await op.initialize(options: OursPrivacyInitOptions(optedOutByDefault: false))
+        XCTAssertFalse(op.hasOptedOutTracking())
+
+        op.track(event: "should-be-kept")
+        op.trackingQueue.sync {}
+        XCTAssertEqual(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).count, 1)
+    }
+
+    func testOptedOutByDefaultDoesNotOverridePersistedOptIn() async {
+        let op = makeInstance()
+        op.optInTracking()
+        op.trackingQueue.sync {}
+        XCTAssertFalse(op.hasOptedOutTracking())
+
+        await op.initialize(options: OursPrivacyInitOptions(optedOutByDefault: true))
+        XCTAssertFalse(op.hasOptedOutTracking())
+    }
+
     func testWipeLegacySQLiteFileIfPresent() {
         let manager = FileManager.default
         let instanceName = "legacy-wipe-\(UUID().uuidString)"
