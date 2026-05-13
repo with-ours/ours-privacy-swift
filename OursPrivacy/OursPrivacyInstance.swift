@@ -75,9 +75,6 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate 
 
     let oursprivacyPersistence: OursPrivacyPersistence
 
-    /// Show the network activity indicator while flushing. iOS-only.
-    open var showNetworkActivityIndicator = true
-
     /// Enables automatic-event tracking. Forwarded to `AutomaticEvents`.
     open var trackAutomaticEventsEnabled: Bool
 
@@ -351,19 +348,6 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate 
         if taskId != UIBackgroundTaskIdentifier.invalid {
             sharedApplication.endBackgroundTask(taskId)
             taskId = UIBackgroundTaskIdentifier.invalid
-#if os(iOS)
-            self.updateNetworkActivityIndicator(false)
-#endif
-        }
-    }
-#endif
-
-#if os(iOS)
-    func updateNetworkActivityIndicator(_ on: Bool) {
-        if showNetworkActivityIndicator {
-            DispatchQueue.main.async { [on] in
-                OursPrivacy.sharedUIApplication()?.isNetworkActivityIndicatorVisible = on
-            }
         }
     }
 #endif

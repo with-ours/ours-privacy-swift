@@ -67,4 +67,4 @@ jobs:
       # CocoaPods consumers will. Without this, the SPM + xcodeproj test paths
       # can be green while the podspec silently references stale file paths.
       - name: pod lib lint
-        run: pod lib lint OursPrivacy-swift.podspec --allow-warnings
+        run: pod lib lint OursPrivacy-swift.podspec

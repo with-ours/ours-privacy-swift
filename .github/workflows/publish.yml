@@ -78,7 +78,7 @@ jobs:
       - run: swift test
 
       - name: Lint podspec
-        run: pod lib lint OursPrivacy-swift.podspec --allow-warnings
+        run: pod lib lint OursPrivacy-swift.podspec
 
   # Publish runs in an isolated job. Tags the release for SPM consumers,
   # pushes the podspec to CocoaPods trunk, and cuts a GitHub release.
@@ -105,7 +105,7 @@ jobs:
       - name: Publish to CocoaPods trunk
         env:
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
-        run: pod trunk push OursPrivacy-swift.podspec --allow-warnings
+        run: pod trunk push OursPrivacy-swift.podspec
 
       - name: Create GitHub release
         env:
