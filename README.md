@@ -86,6 +86,32 @@ func application(_ application: UIApplication,
 }
 ```
 
+## Development
+
+### Run tests
+
+Local fast loop (no simulator required):
+
+```sh
+swift test
+```
+
+CI / full iOS coverage (requires the iOS Simulator runtime — install via Xcode → Settings → Components):
+
+```sh
+xcodebuild test -scheme OursPrivacy -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+```
+
+Any installed iPhone simulator works; the device name above just needs to match a sim installed at the latest iOS version (otherwise pin both name and OS, e.g. `name=iPhone 16 Pro,OS=26.3.1`).
+
+### Run the demo app
+
+Open `OursPrivacyiOSDemo/OursPrivacyiOSDemo.xcodeproj` in Xcode. The demo links to the local SDK via an xcodeproj subproject reference (`../OursPrivacy.xcodeproj`), so edits to SDK sources rebuild on next demo build.
+
+### Capture + assert payloads
+
+`tools/payload-recorder/` has a small HTTP recorder for verifying the SDK's wire output against a fixture. See [`tools/payload-recorder/README.md`](tools/payload-recorder/README.md).
+
 ## Contributing
 
 We welcome contributions! If you'd like to contribute to this SDK, please see our [publishing documentation](PUBLISHING.md) for development and publishing guidelines.

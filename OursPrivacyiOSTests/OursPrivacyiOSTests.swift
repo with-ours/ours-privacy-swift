@@ -7,12 +7,12 @@
 //
 
 import Testing
-@testable import OursPrivacyiOS
+@testable import OursPrivacy
 
 struct OursPrivacyiOSTests {
 
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
+    @Test func maxBatchSizeIsClampedAt50() async throws {
+        #expect(APIConstants.maxBatchSize == 50)
     }
 
 }

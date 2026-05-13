@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Test
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Show Swift / Xcode versions
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: swift test
+        run: swift test
+
+  build-ios:
+    name: Build (iOS)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      # The OursPrivacy module name collides with the OursPrivacy class
+      # name when library evolution is on (BUILD_LIBRARY_FOR_DISTRIBUTION
+      # emits a .swiftinterface and the verifier reads `OursPrivacy.Foo`
+      # as `<class>.<member>` instead of `<module>.<type>`, breaking the
+      # textual interface check).
+      #
+      # We disable LE in CI so the build verifies compilation only — same
+      # behavior as `swift build`. Production releases keep LE on via the
+      # xcodeproj settings. arm64 pinned to match the runner.
+      #
+      # TODO: rename the `OursPrivacy` class (e.g. `OursPrivacyAPI`) so
+      # module + class names no longer collide, then drop these overrides.
+      - name: xcodebuild build (iOS Simulator, arm64)
+        run: |
+          xcodebuild build \
+            -project OursPrivacy.xcodeproj \
+            -scheme OursPrivacy \
+            -destination 'generic/platform=iOS Simulator' \
+            ONLY_ACTIVE_ARCH=YES \
+            ARCHS=arm64 \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=NO

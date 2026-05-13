@@ -1,0 +1,24 @@
+{
+  "configurations" : [
+    {
+      "id" : "F8E1A9C3-6D2B-4E3F-9C1A-2B4D5E6F7A8B",
+      "name" : "Default",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:OursPrivacy.xcodeproj",
+        "identifier" : "7F4C45512DA98C4900F07B25",
+        "name" : "OursPrivacyTests"
+      }
+    }
+  ],
+  "version" : 1
+}
