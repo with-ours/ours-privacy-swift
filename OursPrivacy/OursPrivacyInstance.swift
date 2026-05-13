@@ -451,6 +451,9 @@ extension OursPrivacy {
         }
         if options?.optedOutByDefault == true && optOutStatus == nil {
             optOutTracking()
+            await withCheckedContinuation { cont in
+                trackingQueue.async { cont.resume() }
+            }
         }
         // Kick the flush timer using whatever interval the host has set.
         flushInstance.flushInterval = flushInstance.flushInterval

@@ -114,6 +114,12 @@ public struct OursPrivacyInitOptions {
 - `defaultEventProperties`, `defaultUserCustomProperties`, `defaultUserConsentProperties` — seed the store-level default property bags.
 - `optedOutByDefault` — opt the visitor out on first launch. Ignored if a prior opt-in / opt-out decision is already persisted.
 
+```swift
+await op.initialize(options: OursPrivacyInitOptions(optedOutByDefault: true))
+// op.hasOptedOutTracking() == true on a fresh install; subsequent track() calls are dropped.
+// Call op.optInTracking() once the user grants consent.
+```
+
 ### Identity
 
 ```swift
@@ -130,6 +136,15 @@ public struct OursPrivacyUserProperties {
     public var phoneNumber: String?
     public var firstName: String?
     public var lastName: String?
+    public var gender: String?
+    public var dateOfBirth: String?
+    public var city: String?
+    public var state: String?
+    public var zip: String?
+    public var country: String?
+    public var companyName: String?
+    public var jobTitle: String?
+    public var ip: String?
     public var customProperties: [String: OursPrivacyType]?
     public var consent: [String: OursPrivacyType]?
 }

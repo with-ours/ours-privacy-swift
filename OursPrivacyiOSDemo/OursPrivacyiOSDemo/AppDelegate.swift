@@ -20,14 +20,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        let token = ProcessInfo.processInfo.environment["OURSPRIVACY_TOKEN"] ?? ""
-        let serverURL = ProcessInfo.processInfo.environment["OURSPRIVACY_SERVER_URL"]
+        let env = ProcessInfo.processInfo.environment
+        let token = env["OURSPRIVACY_TOKEN"] ?? ""
+        let serverURL = env["OURSPRIVACY_SERVER_URL"]
+        let optedOutByDefault = env["OURSPRIVACY_OPTED_OUT_BY_DEFAULT"].map { $0 == "1" || $0.lowercased() == "true" }
 
         let op = OursPrivacy(token: token, trackAutomaticEvents: true)
         oursPrivacy = op
 
         Task {
-            await op.initialize(options: OursPrivacyInitOptions(serverURL: serverURL))
+            await op.initialize(options: OursPrivacyInitOptions(serverURL: serverURL,
+                                                                optedOutByDefault: optedOutByDefault))
             op.setLoggingEnabled(true)
             op.flushInterval = 10.0
         }
