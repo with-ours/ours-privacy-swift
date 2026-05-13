@@ -45,9 +45,9 @@ public struct ProxyServerConfig {
 }
 
 /// The SDK entry point. Construct a single instance per project token and
-/// hold the reference for the lifetime of the app. The public surface
-/// mirrors the React Native SDK so cross-platform integrations share a
-/// vocabulary.
+/// hold the reference for the lifetime of the app. The public surface is
+/// aligned across the Ours Privacy SDKs so cross-platform integrations
+/// share a vocabulary.
 ///
 /// ```swift
 /// let op = OursPrivacy(token: "TOKEN", trackAutomaticEvents: true)

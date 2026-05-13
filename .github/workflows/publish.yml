@@ -1,9 +1,5 @@
 name: Publish
 
-# Mirrors the RN repo's publish-npm.yml structure (build job isolated from
-# publish job to limit supply-chain exposure), but the publish step is a
-# no-op placeholder until CocoaPods Trunk push + SPM tag are implemented.
-
 on:
   pull_request:
     types: [closed]
@@ -22,9 +18,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Build + test runs without secrets / id-token: write so a malicious dep
-  # cannot exfiltrate publish auth. Once publishing is wired up, the tarball
-  # / podspec will be handed to the publish job via artifact.
+  # Build + test runs without publish secrets so a malicious dep cannot
+  # exfiltrate the CocoaPods trunk token. The publish job re-checks out
+  # the same commit and runs `pod trunk push` in isolation.
   build:
     name: Build & Test
     runs-on: macos-latest
@@ -36,6 +32,7 @@ jobs:
       contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.version.outputs.sha }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -66,16 +63,25 @@ jobs:
             exit 1
           fi
 
+          PLIST_VERSION=$(grep -A1 "CFBundleShortVersionString" Info.plist | tail -1 | sed -E 's/.*<string>([^<]+)<\/string>.*/\1/')
+          if [ "$PLIST_VERSION" != "$VERSION" ]; then
+            echo "Info.plist CFBundleShortVersionString ($PLIST_VERSION) does not match release version ($VERSION)"
+            exit 1
+          fi
+
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "Building version: $VERSION"
 
       - run: swift build
 
       - run: swift test
 
-  # Publish runs in an isolated job. No project deps loaded beyond what
-  # CocoaPods / git itself needs, to keep secrets away from third-party code.
-  # Currently a no-op — wire up `pod trunk push` + tag/release here.
+      - name: Lint podspec
+        run: pod lib lint OursPrivacy-swift.podspec --allow-warnings
+
+  # Publish runs in an isolated job. Tags the release for SPM consumers,
+  # pushes the podspec to CocoaPods trunk, and cuts a GitHub release.
   publish:
     name: Publish
     runs-on: macos-latest
@@ -83,11 +89,29 @@ jobs:
     permissions:
       contents: write # push release tag, create GitHub release
     steps:
-      - name: Publish (no-op)
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          ref: ${{ needs.build.outputs.sha }}
+
+      - name: Create git tag
         env:
-          VERSION: ${{ needs.build.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: v${{ needs.build.outputs.version }}
         run: |
-          echo "Publishing v${VERSION} — not yet implemented."
-          echo "TODO: pod trunk push OursPrivacy-swift.podspec"
-          echo "TODO: git tag v${VERSION} && git push <token-url> v${VERSION}"
-          echo "TODO: gh release create v${VERSION} --generate-notes"
+          git tag "$VERSION"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$VERSION"
+
+      - name: Publish to CocoaPods trunk
+        env:
+          COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
+        run: pod trunk push OursPrivacy-swift.podspec --allow-warnings
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: v${{ needs.build.outputs.version }}
+        run: |
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --generate-notes

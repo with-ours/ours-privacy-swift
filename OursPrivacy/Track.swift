@@ -27,10 +27,8 @@ class Track {
 
     init() {}
 
-    /// Builds the inner `data[]` element for a `track()` call. Mirrors the wire
-    /// shape pinned by the server's `eventSchema` in
-    /// `martech/packages/types/src/event.ts` and the web-cdp composer in
-    /// `martech/apps/web-cdp/src/lib/format-track.ts`.
+    /// Builds the inner `data[]` element for a `track()` call. Conforms to the
+    /// ingest endpoint's event schema.
     ///
     /// `eventProperties` is `{...defaultEventProperties, ...callerEventProperties}`
     /// (per-call wins on key collision). `userProperties` is per-call only, merged
@@ -60,8 +58,8 @@ class Track {
             }
         }
 
-        // `$distinct_id` override matches web-cdp/format-track.ts:62 — lets
-        // callers pin a per-event distinct_id (e.g. for replay stitching).
+        // `$distinct_id` override lets callers pin a per-event distinct_id
+        // (e.g. for replay stitching).
         let distinctId: String
         if let override = mergedEventProperties["$distinct_id"] as? String, !override.isEmpty {
             distinctId = override
@@ -123,13 +121,12 @@ class Track {
         ]
     }
 
-    /// Mirrors `formatUserProperties` in
-    /// `martech/apps/web-cdp/src/lib/format-track.ts`. Top-level keys come from
-    /// the per-call dict. `custom_properties` is `{...defaults, ...perCall}`
-    /// (per-call wins). `consent` is the same, but the key is **omitted
-    /// entirely** when neither side has consent data — emitting `consent: {}`
-    /// races with the CMP's `$consent_init` and overwrites real consent data
-    /// (OUR-3669).
+    /// Merges per-call user properties with the store-level default custom
+    /// and consent bags. Top-level keys come from the per-call dict.
+    /// `custom_properties` is `{...defaults, ...perCall}` (per-call wins).
+    /// `consent` follows the same rule, but the key is **omitted entirely**
+    /// when neither side has consent data — emitting `consent: {}` races
+    /// with the CMP's `$consent_init` and would overwrite real consent data.
     static func mergeUserProperties(perCall: Properties?,
                                     defaultCustom: [String: Any],
                                     defaultConsent: [String: Any]) -> InternalProperties? {
@@ -167,7 +164,7 @@ class Track {
             merged["custom_properties"] = mergedCustom
         }
 
-        // OUR-3669 guard: only emit `consent` when there's actual consent data.
+        // Only emit `consent` when there's actual consent data — see doc above.
         if haveDefaultConsent || havePerCallConsent {
             var mergedConsent: InternalProperties = [:]
             for (k, v) in defaultConsent { mergedConsent[k] = v }
