@@ -1,0 +1,93 @@
+name: Publish
+
+# Mirrors the RN repo's publish-npm.yml structure (build job isolated from
+# publish job to limit supply-chain exposure), but the publish step is a
+# no-op placeholder until CocoaPods Trunk push + SPM tag are implemented.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g., 2.0.0)"
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  # Build + test runs without secrets / id-token: write so a malicious dep
+  # cannot exfiltrate publish auth. Once publishing is wired up, the tarball
+  # / podspec will be handed to the publish job via artifact.
+  build:
+    name: Build & Test
+    runs-on: macos-latest
+    if: >
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event.pull_request.merged == true &&
+       startsWith(github.event.pull_request.title, 'release:'))
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Extract version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION=$(echo "$PR_TITLE" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          fi
+
+          if [ -z "$VERSION" ]; then
+            echo "Could not extract version"
+            exit 1
+          fi
+
+          POD_VERSION=$(grep -oE "s\.version[[:space:]]*=[[:space:]]*['\"][^'\"]+['\"]" OursPrivacy-swift.podspec | grep -oE "[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9.\-]*")
+          if [ "$POD_VERSION" != "$VERSION" ]; then
+            echo "OursPrivacy-swift.podspec version ($POD_VERSION) does not match release version ($VERSION)"
+            echo "The PR must include the version bump in OursPrivacy-swift.podspec"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building version: $VERSION"
+
+      - run: swift build
+
+      - run: swift test
+
+  # Publish runs in an isolated job. No project deps loaded beyond what
+  # CocoaPods / git itself needs, to keep secrets away from third-party code.
+  # Currently a no-op — wire up `pod trunk push` + tag/release here.
+  publish:
+    name: Publish
+    runs-on: macos-latest
+    needs: build
+    permissions:
+      contents: write # push release tag, create GitHub release
+    steps:
+      - name: Publish (no-op)
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          echo "Publishing v${VERSION} — not yet implemented."
+          echo "TODO: pod trunk push OursPrivacy-swift.podspec"
+          echo "TODO: git tag v${VERSION} && git push <token-url> v${VERSION}"
+          echo "TODO: gh release create v${VERSION} --generate-notes"
