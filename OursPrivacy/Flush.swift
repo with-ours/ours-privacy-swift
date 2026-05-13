@@ -20,7 +20,6 @@ protocol FlushDelegate: AnyObject {
 class Flush: AppLifecycle {
     var timer: Timer?
     weak var delegate: FlushDelegate?
-    var useIPAddressForGeoLocation = true
     var flushRequest: FlushRequest
     var flushOnBackground = true
     var _flushInterval = 0.0
@@ -133,17 +132,16 @@ class Flush: AppLifecycle {
             }
 
 #if os(iOS)
-            if !OursPrivacyInstance.isiOSAppExtension() {
+            if !OursPrivacy.isiOSAppExtension() {
                 delegate?.updateNetworkActivityIndicator(true)
             }
 #endif
             let success = flushRequest.sendRequest(requestData,
                                                    type: type,
-                                                   useIP: useIPAddressForGeoLocation,
                                                    headers: headers,
                                                    queryItems: queryItems)
 #if os(iOS)
-            if !OursPrivacyInstance.isiOSAppExtension() {
+            if !OursPrivacy.isiOSAppExtension() {
                 delegate?.updateNetworkActivityIndicator(false)
             }
 #endif

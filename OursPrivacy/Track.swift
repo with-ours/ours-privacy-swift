@@ -23,7 +23,7 @@ struct EventContext {
 }
 
 class Track {
-    weak var oursprivacyInstance: OursPrivacyInstance?
+    weak var oursprivacyInstance: OursPrivacy?
 
     init() {}
 

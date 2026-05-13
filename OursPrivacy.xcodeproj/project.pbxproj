@@ -27,6 +27,8 @@
 		7F4C45A22DA98DCA00F07B25 /* Network.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C45842DA98DCA00F07B25 /* Network.swift */; };
 		7F4C45A42DA98DCA00F07B25 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C457C2DA98DCA00F07B25 /* Constants.swift */; };
 		7F4C45A52DA98DCA00F07B25 /* FlushRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C45802DA98DCA00F07B25 /* FlushRequest.swift */; };
+		7FA800012E6A100000000001 /* Attribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FA800022E6A100000000002 /* Attribution.swift */; };
+		7FA800032E6A100000000003 /* OursPrivacyTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FA800042E6A100000000004 /* OursPrivacyTypes.swift */; };
 		7F4C45B32DA994FB00F07B25 /* CoreTelephony.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F4C45B22DA994FB00F07B25 /* CoreTelephony.framework */; };
 /* End PBXBuildFile section */
 
@@ -62,6 +64,8 @@
 		7F4C458C2DA98DCA00F07B25 /* PrintLogging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintLogging.swift; sourceTree = "<group>"; };
 		7F4C458D2DA98DCA00F07B25 /* ReadWriteLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadWriteLock.swift; sourceTree = "<group>"; };
 		7F4C458F2DA98DCA00F07B25 /* Track.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Track.swift; sourceTree = "<group>"; };
+		7FA800022E6A100000000002 /* Attribution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Attribution.swift; sourceTree = "<group>"; };
+		7FA800042E6A100000000004 /* OursPrivacyTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OursPrivacyTypes.swift; sourceTree = "<group>"; };
 		7F4C45B22DA994FB00F07B25 /* CoreTelephony.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreTelephony.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.4.sdk/System/Library/Frameworks/CoreTelephony.framework; sourceTree = DEVELOPER_DIR; };
 		86F86E81224404BD00B69832 /* OursPrivacyKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = OursPrivacyKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		E12782B31D4AB4B30025FB05 /* OursPrivacyKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = OursPrivacyKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -122,6 +126,8 @@
 				7F4C45AF2DA9906F00F07B25 /* Networking */,
 				7F4C45862DA98DCA00F07B25 /* OursPrivacy.swift */,
 				7F4C45872DA98DCA00F07B25 /* OursPrivacyInstance.swift */,
+				7FA800042E6A100000000004 /* OursPrivacyTypes.swift */,
+				7FA800022E6A100000000002 /* Attribution.swift */,
 				7F4C457F2DA98DCA00F07B25 /* Flush.swift */,
 				7F4C458F2DA98DCA00F07B25 /* Track.swift */,
 				7F4C45AC2DA9901100F07B25 /* OursPrivacyResources */,
@@ -438,6 +444,8 @@
 				7F4C45A22DA98DCA00F07B25 /* Network.swift in Sources */,
 				7F4C45A42DA98DCA00F07B25 /* Constants.swift in Sources */,
 				7F4C45A52DA98DCA00F07B25 /* FlushRequest.swift in Sources */,
+				7FA800012E6A100000000001 /* Attribution.swift in Sources */,
+				7FA800032E6A100000000003 /* OursPrivacyTypes.swift in Sources */,
 				7F4C454D2DA98C4800F07B25 /* OursPrivacyiOS.docc in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -8,10 +8,10 @@ import PackageDescription
 let package = Package(
     name: "OursPrivacyKit",
     platforms: [
-      .iOS(.v11),
-      .tvOS(.v11),
-      .macOS(.v10_13),
-      .watchOS(.v4)
+      .iOS(.v13),
+      .tvOS(.v13),
+      .macOS(.v10_15),
+      .watchOS(.v6)
     ],
     products: [
         .library(name: "OursPrivacyKit", targets: ["OursPrivacyKit"])
