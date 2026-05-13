@@ -28,8 +28,28 @@ jobs:
           swift --version
           xcodebuild -version
 
-      - name: swift build
-        run: swift build
-
       - name: swift test
         run: swift test
+
+  build-ios:
+    name: Build (iOS)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      # arm64-only: the OursPrivacy module name collides with the
+      # OursPrivacy class name in the emitted swiftinterface verifier, which
+      # currently fails the x86_64 slice. macos-latest runners are arm64, so
+      # arm64-only matches what consumers on Apple Silicon will actually use.
+      # TODO: resolve the module/class collision so universal builds verify.
+      - name: xcodebuild build (iOS Simulator, arm64)
+        run: |
+          xcodebuild build \
+            -project OursPrivacy.xcodeproj \
+            -scheme OursPrivacy \
+            -destination 'generic/platform=iOS Simulator' \
+            ONLY_ACTIVE_ARCH=YES \
+            ARCHS=arm64
