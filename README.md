@@ -1,144 +1,329 @@
+# Ours Privacy Swift SDK
+
 [![Swift Package Manager compatible](https://img.shields.io/badge/Swift%20Package%20Manager-compatible-brightgreen.svg)](https://github.com/apple/swift-package-manager)
 [![Apache License](https://img.shields.io/github/license/with-ours/ours-privacy-swift)](https://oursprivacy.com)
 [![Documentation](https://img.shields.io/badge/Documentation-blue)](https://docs.oursprivacy.com/docs/overview)
-# Table of Contents
 
-<!-- MarkdownTOC -->
+The official Ours Privacy SDK for iOS, tvOS, macOS, and watchOS, written in Swift.
 
-- [Overview](#overview)
-- [Quick Start Guide](#quick-start-guide)
-    - [Install Ours Privacy](#1-install-ours-privacy)
-    - [Initialize Ours Privacy](#2-initialize-oursprivacy)
-    - [Send Data](#3-send-data)
-    - [Check for Success](#4-check-for-success)
-    - [Complete Code Example](#complete-code-example)
+## Table of contents
+
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [API reference](#api-reference)
+- [Payload structure](#payload-structure)
+- [Migration from 1.x](#migration-from-1x)
 - [FAQ](#faq)
+- [Development](#development)
 
-<!-- /MarkdownTOC -->
+## Installation
 
+### Swift Package Manager
 
-<a name="introduction"></a>
-# Overview
+In Xcode: **File → Add Package Dependencies…** and enter `https://github.com/with-ours/ours-privacy-swift`. Pick the latest tagged release.
 
-Welcome to the official Ours Privacy Swift Library
+Or add the package as a dependency in `Package.swift`:
 
-The Ours Privacy Swift library for iOS is an open-source project based on the Mixpanel Swift library and aims to be compatible with it.
+```swift
+.package(url: "https://github.com/with-ours/ours-privacy-swift", from: "2.0.0"),
+```
 
-# Quick Start Guide
-Our master branch and our releases are on Swift 5.
+Then add `"OursPrivacyKit"` to your target's dependencies.
 
-## 1. Install Ours Privacy
-You will need an API token  for an Ours Privacy source for initializing your library. You can get your API token by creating a "Server to Server" source in the Ours Privacy portal.
+### Platform minimums
 
-### Installation: Swift Package Manager (v2.8.0+)
-The easiest way to get Ours Privacy into your iOS project is to use Swift Package Manager.
-1. In Xcode, select File > Add Packages...
-2. Enter the package URL for this repository [Ours Privacy Swift library](https://github.com/with-ours/ours-privacy-swift).
+- iOS 13
+- tvOS 13
+- macOS 10.15
+- watchOS 6
 
+## Quick start
 
-## 2. Initialize Ours Privacy
-Import `OursPrivacy` into AppDelegate.swift, and initialize OursPrivacy within application:didFinishLaunchingWithOptions:
 ```swift
 import OursPrivacyKit
 
-func application(_ application: UIApplication,
-                 didFinishLaunchingWithOptions launchOptions: [NSObject: AnyObject]?) -> Bool {
-    ...
-    OursPrivacy.initialize(token: "API_TOKEN", trackAutomaticEvents: true)
-    // Optionally: OursPrivacy.initialize(token: "API_TOKEN", trackAutomaticEvents: true, serverURL: "https://dev-api.oursprivacy.com/api/v1")
-    ...
+@main
+class AppDelegate: UIResponder, UIApplicationDelegate {
+    var oursPrivacy: OursPrivacy!
+
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        oursPrivacy = OursPrivacy(token: "YOUR_TOKEN", trackAutomaticEvents: true)
+        Task { await oursPrivacy.initialize() }
+        return true
+    }
 }
 ```
 
-## 3. Identify the User
-Once you know which user you're working with (i.e. after login), you can link the user's id to future tracking by calling identify with your user's id.
+Once you know who the visitor is — typically after sign-in — call `identify`:
+
 ```swift
-let userId = "some-uuid-or-unique-id" // Note the data type of string
-OursPrivacy.mainInstance().identify(distinctId: userId, userProperties: ["email": "someone@example.com"])
+oursPrivacy.identify(
+    distinctId: "user-123",
+    userProperties: OursPrivacyUserProperties(
+        email: "user@example.com",
+        firstName: "Ada",
+        lastName: "Lovelace"
+    )
+)
 ```
 
-## 3. Send Data
-Let's get started by sending event data. You can send an event from anywhere in your application. Better understand user behavior by storing details that are specific to the event (properties).   Also, OursPrivacy automatically tracks some properties by default.
+Then record events as the user moves through the app:
+
 ```swift
-OursPrivacy.mainInstance().track(event: "Sign Up", properties: [
-   "source": "Tyler's affiliate site",
-   "Opted out of email": true
+oursPrivacy.track(event: "Sign Up", properties: [
+    "plan": "pro",
+    "source": "landing-page",
 ])
 ```
 
-## 4. Check for Success
-[Open up Recent Events](https://app.oursprivacy.com/recent-events) (under Reporting) in the Ours Privacy portal to view incoming events.
+The SDK batches events and flushes them every 60 seconds and on background. Call `flush()` to force a flush.
 
-## Complete Code Example
-Here's a runnable code example that covers everything in this quickstart guide.
+## API reference
+
+### Constructing the instance
+
 ```swift
-import OursPrivacyKit
+init(token: String, trackAutomaticEvents: Bool)
+init(token: String, trackAutomaticEvents: Bool, proxyServerConfig: ProxyServerConfig)
+```
 
-func application(_ application: UIApplication,
-                 didFinishLaunchingWithOptions launchOptions: [NSObject: AnyObject]?) -> Bool {
-    ...
-    OursPrivacy.initialize(token: "API_TOKEN", trackAutomaticEvents: false)
-    OursPrivacy.mainInstance().track(event: "Sign Up", properties: [
-       "source": "Tyler's affiliate site",
-       "Opted out of email": true
-    ])
-    ...
+Hold a single `OursPrivacy` instance for the lifetime of your app — typically on `AppDelegate`. `trackAutomaticEvents` controls whether the SDK records session and first-launch events automatically (ignored on watchOS / macOS where automatic events aren't supported).
+
+```swift
+func initialize(optOutTrackingDefault: Bool = false,
+                options: OursPrivacyInitOptions? = nil) async
+```
+
+Applies boot-time options and starts the flush timer. Call once, immediately after construction. Safe to skip if you have no options to set, but the flush timer won't start until you do.
+
+```swift
+public struct OursPrivacyInitOptions {
+    public var serverURL: String?
+    public var visitorId: String?
+    public var initialURL: String?
+    public var defaultEventProperties: [String: OursPrivacyType]?
+    public var defaultUserCustomProperties: [String: OursPrivacyType]?
+    public var defaultUserConsentProperties: [String: OursPrivacyType]?
 }
 ```
 
+- `serverURL` — override the default ingest endpoint.
+- `visitorId` — pin a host-supplied visitor ID at boot (equivalent to calling `setVisitorId(_:)`).
+- `initialURL` — parse a URL for attribution at boot (equivalent to calling `trackDeepLink(_:)`).
+- `defaultEventProperties`, `defaultUserCustomProperties`, `defaultUserConsentProperties` — seed the store-level default property bags.
+
+### Identity
+
+```swift
+func identify(distinctId: String,
+              userProperties: OursPrivacyUserProperties? = nil,
+              completion: (() -> Void)? = nil)
+```
+
+Identify the current visitor. `external_id` is automatically populated from `distinctId`. `userProperties` is the typed visitor profile:
+
+```swift
+public struct OursPrivacyUserProperties {
+    public var email: String?
+    public var externalId: String?
+    public var phoneNumber: String?
+    public var firstName: String?
+    public var lastName: String?
+    public var customProperties: [String: OursPrivacyType]?
+    public var consent: [String: OursPrivacyType]?
+}
+```
+
+Swift fields use camelCase; they're serialized to snake_case on the wire (`firstName` → `first_name`).
+
+```swift
+func getVisitorId() -> String?
+func setVisitorId(_ visitorId: String)
+```
+
+`getVisitorId` returns the current visitor ID, or `nil` if the SDK hasn't booted one yet. `setVisitorId` overrides the visitor ID with a host-supplied value (e.g. one received from a web client via a deep link) and flips the envelope's `is_manually_set_id` flag.
+
+```swift
+func reset(completion: (() -> Void)? = nil)
+```
+
+Clear the visitor identity, the typed user bags, and the local event queue. The next event gets a fresh visitor ID.
+
+### Tracking
+
+```swift
+func track(event: String?,
+           properties: Properties? = nil,
+           userProperties: OursPrivacyUserProperties? = nil)
+```
+
+Record an event. `properties` carries free-form event-specific data; the SDK merges the store-level `defaultEventProperties` on top of it. `userProperties` is per-call only — not sticky across subsequent tracks (the server stitches by `visitor_id`).
+
+### Default property bags
+
+```swift
+func updateDefaultEventProperties(_ properties: [String: OursPrivacyType])
+func updateDefaultUserCustomProperties(_ properties: [String: OursPrivacyType])
+func updateDefaultUserConsentProperties(_ properties: [String: OursPrivacyType])
+```
+
+Merge keys into the SDK's default bags. Per-call values win on collision. Useful for properties you want on every event (e.g. an `app_section` or a CMP consent state).
+
+### Deep links
+
+```swift
+func trackDeepLink(_ url: String)
+```
+
+Parse a deep-link URL for marketing attribution and record a `$deep_link_opened` event with the raw URL. UTM parameters and ad-network click IDs are extracted and stored as store-level attribution defaults — they're sent under `defaultProperties` on every subsequent event. Calling `trackDeepLink` again **replaces** the prior attribution rather than merging, so stale UTM keys don't leak into events triggered by a later link.
+
+If the URL carries an `ours_visitor_id` query parameter, the SDK calls `setVisitorId(_:)` so cross-platform sessions (e.g. web → app) stitch to the same visitor.
+
+```swift
+public func parseAttributionFromURL(_ url: String) -> AttributionResult
+```
+
+The standalone parser is also exported if you want to inspect attribution without firing an event:
+
+```swift
+public struct AttributionResult: Equatable {
+    public let utmParams: [String: String]?
+    public let clickIds: [String: String]?
+    public let oursVisitorId: String?
+    public let rawURL: String
+}
+```
+
+### Opt-out
+
+```swift
+func optOutTracking()
+func optInTracking(distinctId: String? = nil, properties: Properties? = nil)
+func hasOptedOutTracking() -> Bool
+```
+
+`optOutTracking()` stops all tracking, regenerates the visitor ID, and clears the local event queue. `optInTracking()` re-enables tracking and fires a `$opt_in` event; if a `distinctId` is supplied it identifies the visitor in the same flow.
+
+### Flush + logging
+
+```swift
+func flush(performFullFlush: Bool = false, completion: (() -> Void)? = nil)
+var flushInterval: Double { get set }
+var flushBatchSize: Int { get set }
+func setLoggingEnabled(_ enabled: Bool)
+```
+
+The flush timer runs every `flushInterval` seconds (default 60). Set `flushInterval = 0` to disable it and call `flush()` manually. Batches are capped at 50 events per request server-side.
+
+## Payload structure
+
+Every event is sent to the `/ingest` endpoint inside a batch envelope:
+
+```json
+{
+  "token": "<your-token>",
+  "is_manually_set_id": false,
+  "data": [
+    {
+      "event": "Sign Up",
+      "visitor_id": "stable-per-install-uuid",
+      "distinct_id": "per-event-uuid",
+      "eventProperties": { "plan": "pro", "source": "landing-page" },
+      "userProperties": null,
+      "defaultProperties": {
+        "device_vendor": "Apple",
+        "device_model": "iPhone17,1",
+        "os_name": "iOS",
+        "os_version": "18.0",
+        "version": "2.0.0"
+      }
+    }
+  ]
+}
+```
+
+- `event` — the event name. Identify events use `$identify`. Deep-link attribution uses `$deep_link_opened`.
+- `visitor_id` — stable per-install UUID. The same value across every event from this device unless `reset()`, `optOutTracking()`, or `setVisitorId()` change it.
+- `distinct_id` — per-event UUID. Callers can override by passing `$distinct_id` in `properties`; the override is removed from the wire `eventProperties` before send.
+- `eventProperties` — free-form event-specific data (merged from `defaultEventProperties` + per-call `properties`, per-call wins). `null` when there's nothing to send.
+- `userProperties` — visitor identity and consent. Carries `external_id`, `email`, `phone_number`, `first_name`, `last_name`, plus nested `custom_properties` and `consent` dicts. `null` when there's nothing to send.
+- `defaultProperties` — device metadata + marketing attribution (UTM params, click IDs).
+
+The SDK only sends `consent` when there's actual consent data on either the per-call argument or the store-level default — emitting `consent: {}` would race with a consent management platform's initialization signal.
+
+## Migration from 1.x
+
+The 2.0 surface is a hard break. The migration is small in practice:
+
+| 1.x | 2.x |
+| --- | --- |
+| `OursPrivacy.initialize(token: ..., trackAutomaticEvents: ...)` | `OursPrivacy(token: ..., trackAutomaticEvents: ...)` then `await op.initialize()` |
+| `OursPrivacy.mainInstance()` | Hold your own `OursPrivacy` reference (typically on `AppDelegate`) |
+| `OursPrivacy.getInstance(name:)`, `setMainInstance(name:)`, `removeInstance(name:)` | Construct multiple `OursPrivacy(...)` instances if you need them |
+| `identify(distinctId:, userProperties: [String: OursPrivacyType])` | `identify(distinctId:, userProperties: OursPrivacyUserProperties)` |
+| `track(event:, properties:, userProperties: [String: OursPrivacyType])` | `track(event:, properties:, userProperties: OursPrivacyUserProperties)` |
+| `op.archive()` | Removed — the events queue is auto-persisted to `UserDefaults` |
+| `op.loggingEnabled = true` | `op.setLoggingEnabled(true)` (property setter still works for source compatibility) |
+| `Flush.useIPAddressForGeoLocation` | Removed |
+
+Events queued under 1.x are not migrated to the new persistence layer; they're dropped on first launch under 2.x.
+
+Platform minimums moved up: iOS 13 / tvOS 13 / macOS 10.15 / watchOS 6 (required for `async`/`await`).
+
+## FAQ
+
+**How do I opt a test user out of tracking?**
+
+Call `optOutTracking()` on your instance. The opt-out flag is persisted to `UserDefaults`; the visitor stays opted out across launches until you call `optInTracking()`.
+
+**Why aren't my events showing up?**
+
+Events are batched. The default flush interval is 60 seconds; the SDK also flushes when the app backgrounds. Call `flush()` to force a send. If events still don't arrive, enable logging with `op.setLoggingEnabled(true)` to see the SDK's debug output, and check that `hasOptedOutTracking()` is `false`.
+
+**Do I need ATT for this SDK?**
+
+No. The SDK doesn't use IDFA and doesn't require user permission through `AppTrackingTransparency`.
+
+**Can I run more than one instance in the same app?**
+
+Yes — just construct multiple `OursPrivacy(...)` instances with different tokens. The SDK no longer has a singleton manager; you're responsible for holding the references.
+
+**How does the deep-link parser decide what to extract?**
+
+`trackDeepLink` extracts known UTM parameters (`utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `utm_name`) and known ad-network click IDs (`gclid`, `fbclid`, `ttclid`, `msclkid`, and a couple dozen others). The ingest API has typed columns for each; unknown query parameters are ignored.
+
 ## Development
 
-### Run tests
-
-Local fast loop (no simulator required):
+Local tests (no simulator needed):
 
 ```sh
 swift test
 ```
 
-CI / full iOS coverage (requires the iOS Simulator runtime — install via Xcode → Settings → Components):
+Full iOS coverage (requires the iOS Simulator runtime):
 
 ```sh
-xcodebuild test -scheme OursPrivacy -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+xcodebuild test \
+  -project OursPrivacy.xcodeproj \
+  -scheme OursPrivacy \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
-Any installed iPhone simulator works; the device name above just needs to match a sim installed at the latest iOS version (otherwise pin both name and OS, e.g. `name=iPhone 16 Pro,OS=26.3.1`).
+Wire-shape parity check (boots a local HTTP recorder and runs the SDK against it):
 
-### Run the demo app
+```sh
+rm -rf /tmp/op-captures && mkdir -p /tmp/op-captures
+python3 tools/payload-recorder/server.py --port 8765 --out /tmp/op-captures &
+swift run RecorderProbe http://127.0.0.1:8765
+python3 tools/payload-recorder/assert_payload.py /tmp/op-captures/*_ingest.json tools/payload-recorder/fixtures/canonical_envelope.json
+pkill -f "tools/payload-recorder/server.py"
+```
 
-Open `OursPrivacyiOSDemo/OursPrivacyiOSDemo.xcodeproj` in Xcode. The demo links to the local SDK via an xcodeproj subproject reference (`../OursPrivacy.xcodeproj`), so edits to SDK sources rebuild on next demo build.
-
-### Capture + assert payloads
-
-`tools/payload-recorder/` has a small HTTP recorder for verifying the SDK's wire output against a fixture. See [`tools/payload-recorder/README.md`](tools/payload-recorder/README.md).
-
-## Contributing
-
-We welcome contributions! If you'd like to contribute to this SDK, please see our [publishing documentation](PUBLISHING.md) for development and publishing guidelines.
+The last command should print `match`. See `tools/payload-recorder/README.md` for details.
 
 ## Support
 
-For help with this SDK, please:
-
-- Check the [documentation](https://docs.oursprivacy.com)
-- Open an issue on [GitHub](https://github.com/with-ours/ours-privacy-swift/issues)
-- Contact us at support@oursprivacy.com
-
-## FAQ
-**I have a test user I would like to opt out of tracking. How do I do that?**
-
-OursPrivacy's client-side tracking library contains the `optOutTracking()` method, which will set the user’s local opt-out state to “true” and will prevent data from being sent from a user’s device.
-
-**Why aren't my events showing up?**
-
-First, make sure your test device has internet access. To preserve battery life and customer bandwidth, the OursPrivacy library doesn't send the events you record immediately. Instead, it sends batches to the Ours Privacy servers every 60 seconds while your application is running, as well as when the application transitions to the background. You can call `flush()` manually if you want to force a flush at a particular moment.
-```swift
-OursPrivacy.mainInstance().flush()
-```
-If your events are still not showing up after 60 seconds, check if you have opted out of tracking. You can also enable OursPrivacy debugging and logging, it allows you to see the debug output from the OursPrivacy library. To enable it, set `loggingEnabled` to true.
-```swift
-OursPrivacy.mainInstance().loggingEnabled = true
-```
-**Starting with iOS 14.5, do I need to request the user’s permission through the AppTrackingTransparency framework to use OursPrivacy?**
-
-No, OursPrivacy does not use IDFA so it does not require user permission through the AppTrackingTransparency(ATT) framework.
+- Documentation: [docs.oursprivacy.com](https://docs.oursprivacy.com)
+- Issues: [GitHub issues](https://github.com/with-ours/ours-privacy-swift/issues)
+- Email: support@oursprivacy.com
