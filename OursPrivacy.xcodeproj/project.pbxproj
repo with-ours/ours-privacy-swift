@@ -12,7 +12,6 @@
 		7F4C45902DA98DCA00F07B25 /* OursPrivacy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C45862DA98DCA00F07B25 /* OursPrivacy.swift */; };
 		7F4C45912DA98DCA00F07B25 /* OursPrivacyPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C45892DA98DCA00F07B25 /* OursPrivacyPersistence.swift */; };
 		7F4C45922DA98DCA00F07B25 /* Flush.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C457F2DA98DCA00F07B25 /* Flush.swift */; };
-		7F4C45952DA98DCA00F07B25 /* FileLogging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C457E2DA98DCA00F07B25 /* FileLogging.swift */; };
 		7F4C45962DA98DCA00F07B25 /* OursPrivacyType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C458A2DA98DCA00F07B25 /* OursPrivacyType.swift */; };
 		7F4C45972DA98DCA00F07B25 /* JSONHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C45822DA98DCA00F07B25 /* JSONHandler.swift */; };
 		7F4C45982DA98DCA00F07B25 /* Error.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4C457D2DA98DCA00F07B25 /* Error.swift */; };
@@ -49,7 +48,6 @@
 		7F4C457B2DA98DCA00F07B25 /* AutomaticProperties.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomaticProperties.swift; sourceTree = "<group>"; };
 		7F4C457C2DA98DCA00F07B25 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		7F4C457D2DA98DCA00F07B25 /* Error.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Error.swift; sourceTree = "<group>"; };
-		7F4C457E2DA98DCA00F07B25 /* FileLogging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileLogging.swift; sourceTree = "<group>"; };
 		7F4C457F2DA98DCA00F07B25 /* Flush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Flush.swift; sourceTree = "<group>"; };
 		7F4C45802DA98DCA00F07B25 /* FlushRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlushRequest.swift; sourceTree = "<group>"; };
 		7F4C45822DA98DCA00F07B25 /* JSONHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONHandler.swift; sourceTree = "<group>"; };
@@ -137,7 +135,6 @@
 		7F4C45AE2DA9905000F07B25 /* Logging */ = {
 			isa = PBXGroup;
 			children = (
-				7F4C457E2DA98DCA00F07B25 /* FileLogging.swift */,
 				7F4C45882DA98DCA00F07B25 /* OursPrivacyLogger.swift */,
 				7F4C458C2DA98DCA00F07B25 /* PrintLogging.swift */,
 			);
@@ -426,7 +423,6 @@
 				7F4C45902DA98DCA00F07B25 /* OursPrivacy.swift in Sources */,
 				7F4C45912DA98DCA00F07B25 /* OursPrivacyPersistence.swift in Sources */,
 				7F4C45922DA98DCA00F07B25 /* Flush.swift in Sources */,
-				7F4C45952DA98DCA00F07B25 /* FileLogging.swift in Sources */,
 				7F4C45962DA98DCA00F07B25 /* OursPrivacyType.swift in Sources */,
 				7F4C45972DA98DCA00F07B25 /* JSONHandler.swift in Sources */,
 				7F4C45982DA98DCA00F07B25 /* Error.swift in Sources */,
