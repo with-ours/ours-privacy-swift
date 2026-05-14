@@ -350,7 +350,7 @@ op.updateDefaultUserConsentProperties(["marketing": true])
 
 #### `op.flushInterval`
 
-The flush timer runs every `flushInterval` seconds (default 60). Set `flushInterval = 0` to disable it and call `flush()` manually.
+The flush timer runs every `flushInterval` seconds (default 10). Set `flushInterval = 0` to disable it and call `flush()` manually.
 
 ```swift
 op.flushInterval = 30
@@ -589,7 +589,7 @@ No. Ours Privacy does not use IDFA, so no ATT permission is required.
 
 **Why aren't my events showing up?**
 
-Events are batched and sent every 60 seconds by default. Call `flush()` to send immediately. Enable debug logging with `setLoggingEnabled(true)` to see what's happening. Also check that `hasOptedOutTracking()` is `false`.
+Events are batched and sent every 10 seconds by default. Call `flush()` to send immediately. Enable debug logging with `setLoggingEnabled(true)` to see what's happening. Also check that `hasOptedOutTracking()` is `false`.
 
 **Can I run more than one instance in the same app?**
 

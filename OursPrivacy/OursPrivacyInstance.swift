@@ -176,7 +176,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate 
     /// events aren't supported.
     public convenience init(token: String, trackAutomaticEvents: Bool) {
         self.init(apiToken: token,
-                  flushInterval: 60,
+                  flushInterval: 10,
                   name: token,
                   trackAutomaticEvents: trackAutomaticEvents,
                   optOutTrackingByDefault: false,
@@ -190,7 +190,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate 
     /// ``initialize(options:)`` immediately after.
     public convenience init(token: String, trackAutomaticEvents: Bool, proxyServerConfig: ProxyServerConfig) {
         self.init(apiToken: token,
-                  flushInterval: 60,
+                  flushInterval: 10,
                   name: token,
                   trackAutomaticEvents: trackAutomaticEvents,
                   optOutTrackingByDefault: false,
