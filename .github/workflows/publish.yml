@@ -102,10 +102,38 @@ jobs:
           git tag "$VERSION"
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$VERSION"
 
+      # Trunk service occasionally returns a 500 on the response path while
+      # the spec has already been committed server-side. Treat a non-zero
+      # push exit as success if the trunk read API reports the version as
+      # live; only fail if it's genuinely missing after a short retry window.
       - name: Publish to CocoaPods trunk
         env:
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
-        run: pod trunk push OursPrivacy-swift.podspec
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set +e
+          pod trunk push OursPrivacy-swift.podspec
+          PUSH_EXIT=$?
+          set -e
+
+          if [ "$PUSH_EXIT" -eq 0 ]; then
+            echo "pod trunk push exited cleanly."
+            exit 0
+          fi
+
+          echo "::warning::pod trunk push exited $PUSH_EXIT — checking trunk API to see if the publish committed anyway..."
+          for attempt in 1 2 3; do
+            if curl -sf "https://trunk.cocoapods.org/api/v1/pods/OursPrivacy-swift" \
+              | jq -e --arg v "$VERSION" 'any(.versions[]?; .name == $v)' > /dev/null 2>&1; then
+              echo "Version $VERSION is live on trunk. Treating as success."
+              exit 0
+            fi
+            echo "Attempt $attempt/3: $VERSION not yet visible on trunk. Sleeping 15s..."
+            sleep 15
+          done
+
+          echo "::error::pod trunk push failed and $VERSION is not present on trunk after retries."
+          exit "$PUSH_EXIT"
 
       - name: Create GitHub release
         env:
