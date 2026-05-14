@@ -53,18 +53,3 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             ONLY_ACTIVE_ARCH=YES \
             ARCHS=arm64
-
-  lint-podspec:
-    name: Lint Podspec
-    runs-on: macos-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      # `pod lib lint` exercises the podspec against the source tree the way
-      # CocoaPods consumers will. Without this, the SPM + xcodeproj test paths
-      # can be green while the podspec silently references stale file paths.
-      - name: pod lib lint
-        run: pod lib lint OursPrivacy-swift.podspec

@@ -18,9 +18,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Build + test runs without publish secrets so a malicious dep cannot
-  # exfiltrate the CocoaPods trunk token. The publish job re-checks out
-  # the same commit and runs `pod trunk push` in isolation.
   build:
     name: Build & Test
     runs-on: macos-latest
@@ -56,13 +53,6 @@ jobs:
             exit 1
           fi
 
-          POD_VERSION=$(grep -oE "s\.version[[:space:]]*=[[:space:]]*['\"][^'\"]+['\"]" OursPrivacy-swift.podspec | grep -oE "[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9.\-]*")
-          if [ "$POD_VERSION" != "$VERSION" ]; then
-            echo "OursPrivacy-swift.podspec version ($POD_VERSION) does not match release version ($VERSION)"
-            echo "The PR must include the version bump in OursPrivacy-swift.podspec"
-            exit 1
-          fi
-
           PLIST_VERSION=$(grep -A1 "CFBundleShortVersionString" Info.plist | tail -1 | sed -E 's/.*<string>([^<]+)<\/string>.*/\1/')
           if [ "$PLIST_VERSION" != "$VERSION" ]; then
             echo "Info.plist CFBundleShortVersionString ($PLIST_VERSION) does not match release version ($VERSION)"
@@ -77,11 +67,6 @@ jobs:
 
       - run: swift test
 
-      - name: Lint podspec
-        run: pod lib lint OursPrivacy-swift.podspec
-
-  # Publish runs in an isolated job. Tags the release for SPM consumers,
-  # pushes the podspec to CocoaPods trunk, and cuts a GitHub release.
   publish:
     name: Publish
     runs-on: macos-latest
@@ -101,39 +86,6 @@ jobs:
         run: |
           git tag "$VERSION"
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$VERSION"
-
-      # Trunk service occasionally returns a 500 on the response path while
-      # the spec has already been committed server-side. Treat a non-zero
-      # push exit as success if the trunk read API reports the version as
-      # live; only fail if it's genuinely missing after a short retry window.
-      - name: Publish to CocoaPods trunk
-        env:
-          COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
-          VERSION: ${{ needs.build.outputs.version }}
-        run: |
-          set +e
-          pod trunk push OursPrivacy-swift.podspec
-          PUSH_EXIT=$?
-          set -e
-
-          if [ "$PUSH_EXIT" -eq 0 ]; then
-            echo "pod trunk push exited cleanly."
-            exit 0
-          fi
-
-          echo "::warning::pod trunk push exited $PUSH_EXIT — checking trunk API to see if the publish committed anyway..."
-          for attempt in 1 2 3; do
-            if curl -sf "https://trunk.cocoapods.org/api/v1/pods/OursPrivacy-swift" \
-              | jq -e --arg v "$VERSION" 'any(.versions[]?; .name == $v)' > /dev/null 2>&1; then
-              echo "Version $VERSION is live on trunk. Treating as success."
-              exit 0
-            fi
-            echo "Attempt $attempt/3: $VERSION not yet visible on trunk. Sleeping 15s..."
-            sleep 15
-          done
-
-          echo "::error::pod trunk push failed and $VERSION is not present on trunk after retries."
-          exit "$PUSH_EXIT"
 
       - name: Create GitHub release
         env:

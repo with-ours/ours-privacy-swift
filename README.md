@@ -1,14 +1,12 @@
 # Ours Privacy Swift SDK
 
 [![Swift Package Manager compatible](https://img.shields.io/badge/Swift%20Package%20Manager-compatible-brightgreen.svg)](https://github.com/apple/swift-package-manager)
-[![CocoaPods](https://img.shields.io/cocoapods/v/OursPrivacy-swift.svg)](https://cocoapods.org/pods/OursPrivacy-swift)
 [![Apache License](https://img.shields.io/github/license/with-ours/ours-privacy-swift)](https://oursprivacy.com)
 [![Documentation](https://img.shields.io/badge/Documentation-blue)](https://docs.oursprivacy.com/docs/ios-sdk)
 
 Privacy-first analytics for iOS, tvOS, macOS, and watchOS, written in Swift.
 
 - [Swift Package Manager](https://github.com/with-ours/ours-privacy-swift) — `https://github.com/with-ours/ours-privacy-swift`
-- [CocoaPods](https://cocoapods.org/pods/OursPrivacy-swift) — `pod 'OursPrivacy-swift'`
 - [GitHub](https://github.com/with-ours/ours-privacy-swift)
 - [Docs](https://docs.oursprivacy.com/docs/ios-sdk)
 
@@ -36,7 +34,7 @@ Privacy-first analytics for iOS, tvOS, macOS, and watchOS, written in Swift.
 
 ### 1. Install
 
-**Swift Package Manager (recommended).** In Xcode: **File → Add Package Dependencies…** and enter `https://github.com/with-ours/ours-privacy-swift`. Or add to `Package.swift`:
+In Xcode: **File → Add Package Dependencies…** and enter `https://github.com/with-ours/ours-privacy-swift`. Or add to `Package.swift`:
 
 ```swift
 .package(url: "https://github.com/with-ours/ours-privacy-swift", from: "2.0.0"),
@@ -44,13 +42,9 @@ Privacy-first analytics for iOS, tvOS, macOS, and watchOS, written in Swift.
 
 Then add `"OursPrivacyKit"` to your target's dependencies.
 
-**CocoaPods.** Add to your `Podfile`:
-
-```ruby
-pod 'OursPrivacy-swift'
-```
-
 **Platform minimums:** iOS 13, tvOS 13, macOS 10.15, watchOS 6.
+
+> **Migrating from CocoaPods?** Past versions of `OursPrivacy-swift` remain installable from CocoaPods trunk but receive no further updates. New releases ship via Swift Package Manager.
 
 ### 2. Initialize
 
