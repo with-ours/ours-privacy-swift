@@ -7,8 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		7F1A1DE42DA712990091ADFE /* OursPrivacyKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F1A1DDD2DA712730091ADFE /* OursPrivacyKit.framework */; };
-		7F1A1DE52DA712990091ADFE /* OursPrivacyKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 7F1A1DDD2DA712730091ADFE /* OursPrivacyKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		AA110003000000000000003A /* OursPrivacyKit in Frameworks */ = {isa = PBXBuildFile; productRef = AA110002000000000000002A /* OursPrivacyKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -26,35 +25,7 @@
 			remoteGlobalIDString = 7F1A1D952DA6FACF0091ADFE;
 			remoteInfo = OursPrivacyiOSDemo;
 		};
-		7F1A1DDC2DA712730091ADFE /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 7F1A1DD32DA712730091ADFE /* OursPrivacy.xcodeproj */;
-			proxyType = 2;
-			remoteGlobalIDString = E115947D1CFF1491007F8B4F;
-			remoteInfo = OursPrivacy;
-		};
 /* End PBXContainerItemProxy section */
-
-/* Begin PBXCopyFilesBuildPhase section */
-		7F1A1DE62DA7129A0091ADFE /* Embed Frameworks */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 10;
-			files = (
-				7F1A1DE52DA712990091ADFE /* OursPrivacyKit.framework in Embed Frameworks */,
-			);
-			name = "Embed Frameworks";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
-
-/* Begin PBXFileReference section */
-		7F1A1D962DA6FACF0091ADFE /* OursPrivacyiOSDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OursPrivacyiOSDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		7F1A1DAC2DA6FAD50091ADFE /* OursPrivacyiOSDemoTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OursPrivacyiOSDemoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		7F1A1DB62DA6FAD50091ADFE /* OursPrivacyiOSDemoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OursPrivacyiOSDemoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		7F1A1DD32DA712730091ADFE /* OursPrivacy.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = OursPrivacy.xcodeproj; path = ../OursPrivacy.xcodeproj; sourceTree = SOURCE_ROOT; };
-/* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
 		7F1A1DBE2DA6FAD50091ADFE /* Exceptions for "OursPrivacyiOSDemo" folder in "OursPrivacyiOSDemo" target */ = {
@@ -92,7 +63,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				7F1A1DE42DA712990091ADFE /* OursPrivacyKit.framework in Frameworks */,
+				AA110003000000000000003A /* OursPrivacyKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -121,7 +92,6 @@
 				7F1A1DB92DA6FAD50091ADFE /* OursPrivacyiOSDemoUITests */,
 				7F1A1DD12DA710AA0091ADFE /* Frameworks */,
 				7F1A1D972DA6FACF0091ADFE /* Products */,
-				7F1A1DD32DA712730091ADFE /* OursPrivacy.xcodeproj */,
 			);
 			sourceTree = "<group>";
 		};
@@ -142,15 +112,13 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		7F1A1DD62DA712730091ADFE /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				7F1A1DDD2DA712730091ADFE /* OursPrivacyKit.framework */,
-			);
-			name = Products;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
+
+/* Begin PBXFileReference section */
+		7F1A1D962DA6FACF0091ADFE /* OursPrivacyiOSDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OursPrivacyiOSDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7F1A1DAC2DA6FAD50091ADFE /* OursPrivacyiOSDemoTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OursPrivacyiOSDemoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		7F1A1DB62DA6FAD50091ADFE /* OursPrivacyiOSDemoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OursPrivacyiOSDemoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
 
 /* Begin PBXNativeTarget section */
 		7F1A1D952DA6FACF0091ADFE /* OursPrivacyiOSDemo */ = {
@@ -160,7 +128,6 @@
 				7F1A1D922DA6FACF0091ADFE /* Sources */,
 				7F1A1D932DA6FACF0091ADFE /* Frameworks */,
 				7F1A1D942DA6FACF0091ADFE /* Resources */,
-				7F1A1DE62DA7129A0091ADFE /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -171,6 +138,7 @@
 			);
 			name = OursPrivacyiOSDemo;
 			packageProductDependencies = (
+				AA110002000000000000002A /* OursPrivacyKit */,
 			);
 			productName = OursPrivacyiOSDemo;
 			productReference = 7F1A1D962DA6FACF0091ADFE /* OursPrivacyiOSDemo.app */;
@@ -254,15 +222,12 @@
 			);
 			mainGroup = 7F1A1D8D2DA6FACF0091ADFE;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				AA110001000000000000001A /* XCRemoteSwiftPackageReference "ours-privacy-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7F1A1D972DA6FACF0091ADFE /* Products */;
 			projectDirPath = "";
-			projectReferences = (
-				{
-					ProductGroup = 7F1A1DD62DA712730091ADFE /* Products */;
-					ProjectRef = 7F1A1DD32DA712730091ADFE /* OursPrivacy.xcodeproj */;
-				},
-			);
 			projectRoot = "";
 			targets = (
 				7F1A1D952DA6FACF0091ADFE /* OursPrivacyiOSDemo */,
@@ -271,16 +236,6 @@
 			);
 		};
 /* End PBXProject section */
-
-/* Begin PBXReferenceProxy section */
-		7F1A1DDD2DA712730091ADFE /* OursPrivacyKit.framework */ = {
-			isa = PBXReferenceProxy;
-			fileType = wrapper.framework;
-			path = OursPrivacyKit.framework;
-			remoteRef = 7F1A1DDC2DA712730091ADFE /* PBXContainerItemProxy */;
-			sourceTree = BUILT_PRODUCTS_DIR;
-		};
-/* End PBXReferenceProxy section */
 
 /* Begin PBXResourcesBuildPhase section */
 		7F1A1D942DA6FACF0091ADFE /* Resources */ = {
@@ -639,6 +594,26 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AA110001000000000000001A /* XCRemoteSwiftPackageReference "ours-privacy-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/with-ours/ours-privacy-swift.git";
+			requirement = {
+				kind = exactVersion;
+				version = "2.0.0";
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AA110002000000000000002A /* OursPrivacyKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA110001000000000000001A /* XCRemoteSwiftPackageReference "ours-privacy-swift" */;
+			productName = OursPrivacyKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+
 	};
 	rootObject = 7F1A1D8E2DA6FACF0091ADFE /* Project object */;
 }

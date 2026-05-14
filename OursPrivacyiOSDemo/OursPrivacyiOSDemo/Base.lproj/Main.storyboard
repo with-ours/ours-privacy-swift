@@ -134,6 +134,7 @@
                         <outlet property="btnYellow" destination="poS-BP-vgC" id="dfg-5z-5Di"/>
                         <outlet property="txtId" destination="71C-nB-LhV" id="gLH-Yl-hDF"/>
                         <outlet property="txtToken" destination="8ku-Ev-Rtg" id="5V7-GI-4ht"/>
+                        <outlet property="txtResults" destination="xip-ER-E34" id="A1B-2C-3D4"/>
                     </connections>
                 </viewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="dkx-z0-nzr" sceneMemberID="firstResponder"/>

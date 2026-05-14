@@ -1,0 +1,15 @@
+{
+  "originHash" : "aa110001000000000000001a",
+  "pins" : [
+    {
+      "identity" : "ours-privacy-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/with-ours/ours-privacy-swift.git",
+      "state" : {
+        "revision" : "01d5c2040194796ff5d54c9db0e531f6c97e2a38",
+        "version" : "2.0.0"
+      }
+    }
+  ],
+  "version" : 3
+}

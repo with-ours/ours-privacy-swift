@@ -77,13 +77,13 @@
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "OURSPRIVACY_TOKEN"
-            value = "e93676a05e4c1dbed98cd2cd3fc03b206c289921af313192296d9dbbf0bfff00"
+            value = ""
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
             key = "OURSPRIVACY_SERVER_URL"
-            value = "https://dev-api.oursprivacy.com/api/v1"
-            isEnabled = "YES">
+            value = ""
+            isEnabled = "NO">
          </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>
