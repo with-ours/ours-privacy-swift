@@ -218,7 +218,7 @@ final class OursPrivacyTests: XCTestCase {
         let p = AutomaticProperties.defaultProperties
         XCTAssertNotNil(p["device_vendor"])
         XCTAssertNotNil(p["device_model"])
-        XCTAssertNotNil(p["version"])
+        XCTAssertEqual(p["version"] as? String, "swift@\(AutomaticProperties.libVersion())")
         // device_type / os_name / os_version / screen_* depend on the host
         // platform; at minimum the cross-platform anchors must be present.
         // Legacy dollar-prefixed / snake_case keys must be absent.

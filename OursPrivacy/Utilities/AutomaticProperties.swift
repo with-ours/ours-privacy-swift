@@ -27,7 +27,7 @@ class AutomaticProperties {
         var p = InternalProperties()
         p["device_vendor"] = "Apple"
         p["device_model"] = AutomaticProperties.deviceModel()
-        p["version"] = AutomaticProperties.libVersion()
+        p["version"] = "swift@\(AutomaticProperties.libVersion())"
 
         #if os(iOS) || os(tvOS)
             let screenSize = UIScreen.main.bounds.size
