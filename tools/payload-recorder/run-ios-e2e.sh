@@ -28,7 +28,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 ready=0
-for attempt in {1..30}; do
+for attempt in {1..120}; do
     if ! kill -0 "$recorder_pid" 2>/dev/null; then
         echo "Recorder exited before becoming ready" >&2
         cat "$run_dir/recorder.log" >&2
@@ -42,7 +42,7 @@ for attempt in {1..30}; do
     sleep 1
 done
 if [[ "$ready" -ne 1 ]]; then
-    echo "Recorder did not become ready after 30 seconds" >&2
+    echo "Recorder did not become ready after 120 seconds" >&2
     echo "Recorder process:" >&2
     ps -p "$recorder_pid" -o pid=,stat=,command= >&2 || true
     echo "Recorder log:" >&2
