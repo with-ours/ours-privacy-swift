@@ -25,6 +25,7 @@ Privacy-first analytics for iOS, tvOS, macOS, and watchOS, written in Swift.
   - [Deep Link Attribution](#deep-link-attribution)
   - [Privacy Controls](#privacy-controls)
 - [Payload Structure](#payload-structure)
+- [Local Demo Tests](#local-demo-tests)
 - [FAQ](#faq)
 - [Support](#support)
 
@@ -37,14 +38,20 @@ Privacy-first analytics for iOS, tvOS, macOS, and watchOS, written in Swift.
 In Xcode: **File → Add Package Dependencies…** and enter `https://github.com/with-ours/ours-privacy-swift`. Or add to `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/with-ours/ours-privacy-swift", from: "2.0.0"),
+.package(url: "https://github.com/with-ours/ours-privacy-swift", from: "3.0.0"),
 ```
 
 Then add `"OursPrivacyKit"` to your target's dependencies.
 
-**Platform minimums:** iOS 13, tvOS 13, macOS 10.15, watchOS 6.
+**Platform minimums:** iOS 15, tvOS 15, macOS 12, watchOS 8.
 
 > **Migrating from CocoaPods?** Past versions of `OursPrivacy-swift` remain installable from CocoaPods trunk but receive no further updates. New releases ship via Swift Package Manager.
+
+### Upgrading to 3.0
+
+Version 3.0 requires Xcode with Swift 6 support and raises the deployment targets to iOS 15, tvOS 15, macOS 12, and watchOS 8. Apps with lower deployment targets should remain on 2.x. The package uses Swift 5 language mode with complete concurrency checking.
+
+The `identify`, `reset`, and `flush` completion closures are now `@Sendable`. If a completion captures mutable or main-actor state, move that work onto the appropriate actor or capture a thread-safe value. Event payloads now report `defaultProperties.version` as `swift@3.0.0`; update any code that compares the old value. CocoaPods consumers must move to Swift Package Manager for 3.0.
 
 ### 2. Initialize
 
@@ -557,7 +564,7 @@ The SDK sends a JSON body to `POST /ingest` on the configured `serverURL`. Under
         "os_version": "18.0",
         "device_vendor": "Apple",
         "device_model": "iPhone17,1",
-        "version": "2.0.0"
+        "version": "swift@3.0.0"
       }
     }
   ]
@@ -581,6 +588,20 @@ The SDK sends a JSON body to `POST /ingest` on the configured `serverURL`. Under
 
 ---
 
+## Local Demo Tests
+
+Install Xcode 26.5 with the iOS 26.5 simulator runtime. From the repository root, run:
+
+```sh
+./tools/payload-recorder/run-ios-e2e.sh
+```
+
+The command starts the included recorder, runs the UIKit demo on an iPhone 17 Pro simulator, and checks the payloads sent by each demo action. It needs no Ours Privacy account or external service. Each run saves captures in its own directory under `tools/payload-recorder/captures/`; the command prints the path. CI uses this same command.
+
+The demo Xcode project resolves the SDK from this checkout. Set `OURSPRIVACY_TOKEN` and `OURSPRIVACY_SERVER_URL` in the demo scheme to try it manually against your own source.
+
+---
+
 ## FAQ
 
 **Do I need to request permission through AppTrackingTransparency?**
@@ -597,10 +618,10 @@ Yes — construct multiple `OursPrivacy(...)` instances with different tokens. Y
 
 **What platforms are supported?**
 
-- iOS 13+
-- tvOS 13+
-- macOS 10.15+
-- watchOS 6+
+- iOS 15+
+- tvOS 15+
+- macOS 12+
+- watchOS 8+
 
 ---
 

@@ -58,38 +58,44 @@ public protocol OursPrivacyLogging {
     func addMessage(message: OursPrivacyLogMessage)
 }
 
+// All access to logger registrations and levels goes through lock.
+private final class LoggerState: @unchecked Sendable {
+    let lock = ReadWriteLock(label: "loggerLock")
+    let deliveryLock = NSRecursiveLock()
+    var loggers = [OursPrivacyLogging]()
+    var enabledLevels = Set<OursPrivacyLogLevel>()
+}
+
 public class OursPrivacyLogger {
-    private static var loggers = [OursPrivacyLogging]()
-    private static var enabledLevels = Set<OursPrivacyLogLevel>()
-    private static let readWriteLock: ReadWriteLock = ReadWriteLock(label: "loggerLock")
+    private static let state = LoggerState()
 
     /// Add a `OursPrivacyLogging` object to receive all log messages
     public class func addLogging(_ logging: OursPrivacyLogging) {
-        readWriteLock.write {
-            loggers.append(logging)
+        state.lock.write {
+            state.loggers.append(logging)
         }
     }
 
     /// Enable log messages of a specific `LogLevel` to be added to the log
     class func enableLevel(_ level: OursPrivacyLogLevel) {
-        _ = readWriteLock.write {
-            enabledLevels.insert(level)
+        _ = state.lock.write {
+            state.enabledLevels.insert(level)
         }
     }
 
     /// Disable log messages of a specific `LogLevel` to prevent them from being logged
     class func disableLevel(_ level: OursPrivacyLogLevel) {
-        _ = readWriteLock.write {
-            enabledLevels.remove(level)
+        _ = state.lock.write {
+            state.enabledLevels.remove(level)
         }
     }
 
     /// debug: Adds a debug message to the OursPrivacy log
     /// - Parameter message: The message to be added to the log
-    class func debug(message: @autoclosure() -> Any, _ path: String = #file, _ function: String = #function) {
+    class func debug(message: @autoclosure () -> Any, _ path: String = #file, _ function: String = #function) {
         var enabledLevels = Set<OursPrivacyLogLevel>()
-        readWriteLock.read {
-            enabledLevels = self.enabledLevels
+        state.lock.read {
+            enabledLevels = state.enabledLevels
         }
         guard enabledLevels.contains(.debug) else { return }
         forwardLogMessage(OursPrivacyLogMessage(path: path, function: function, text: "\(message())",
@@ -98,10 +104,10 @@ public class OursPrivacyLogger {
 
     /// info: Adds an informational message to the OursPrivacy log
     /// - Parameter message: The message to be added to the log
-    class func info(message: @autoclosure() -> Any, _ path: String = #file, _ function: String = #function) {
+    class func info(message: @autoclosure () -> Any, _ path: String = #file, _ function: String = #function) {
         var enabledLevels = Set<OursPrivacyLogLevel>()
-        readWriteLock.read {
-            enabledLevels = self.enabledLevels
+        state.lock.read {
+            enabledLevels = state.enabledLevels
         }
         guard enabledLevels.contains(.info) else { return }
         forwardLogMessage(OursPrivacyLogMessage(path: path, function: function, text: "\(message())",
@@ -110,10 +116,10 @@ public class OursPrivacyLogger {
 
     /// warn: Adds a warning message to the OursPrivacy log
     /// - Parameter message: The message to be added to the log
-    class func warn(message: @autoclosure() -> Any, _ path: String = #file, _ function: String = #function) {
+    class func warn(message: @autoclosure () -> Any, _ path: String = #file, _ function: String = #function) {
         var enabledLevels = Set<OursPrivacyLogLevel>()
-        readWriteLock.read {
-            enabledLevels = self.enabledLevels
+        state.lock.read {
+            enabledLevels = state.enabledLevels
         }
         guard enabledLevels.contains(.warning) else { return }
         forwardLogMessage(OursPrivacyLogMessage(path: path, function: function, text: "\(message())",
@@ -122,10 +128,10 @@ public class OursPrivacyLogger {
 
     /// error: Adds an error message to the OursPrivacy log
     /// - Parameter message: The message to be added to the log
-    class func error(message: @autoclosure() -> Any, _ path: String = #file, _ function: String = #function) {
+    class func error(message: @autoclosure () -> Any, _ path: String = #file, _ function: String = #function) {
         var enabledLevels = Set<OursPrivacyLogLevel>()
-        readWriteLock.read {
-            enabledLevels = self.enabledLevels
+        state.lock.read {
+            enabledLevels = state.enabledLevels
         }
         guard enabledLevels.contains(.error) else { return }
         forwardLogMessage(OursPrivacyLogMessage(path: path, function: function, text: "\(message())",
@@ -136,11 +142,11 @@ public class OursPrivacyLogger {
     class private func forwardLogMessage(_ message: OursPrivacyLogMessage) {
         // Forward the log message to every registered OursPrivacyLogging instance
         var loggers = [OursPrivacyLogging]()
-        readWriteLock.read {
-            loggers = self.loggers
+        state.lock.read {
+            loggers = state.loggers
         }
-        readWriteLock.write {
-            loggers.forEach { $0.addMessage(message: message) }
-        }
+        state.deliveryLock.lock()
+        defer { state.deliveryLock.unlock() }
+        loggers.forEach { $0.addMessage(message: message) }
     }
 }

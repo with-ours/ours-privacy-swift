@@ -59,22 +59,13 @@ jobs:
 
           # For release PRs, validate version consistency across all files
           if [[ $BASE_PREFIX == "release" ]]; then
-            VERSION=$(echo "$PR_TITLE" | grep -oP '\d+\.\d+\.\d+')
+            VERSION=$(echo "$PR_TITLE" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
             if [ -z "$VERSION" ]; then
               echo "❌ Release PR title must include a semver version (e.g., release: 1.1.0)"
               exit 1
             fi
 
-            echo "Checking version $VERSION in Info.plist..."
-
-            PLIST_VERSION=$(grep -A1 "CFBundleShortVersionString" Info.plist | tail -1 | sed -E 's/.*<string>([^<]+)<\/string>.*/\1/')
-            if [ "$PLIST_VERSION" != "$VERSION" ]; then
-              echo "❌ Version mismatch! PR title says $VERSION but Info.plist has $PLIST_VERSION."
-              echo "Info.plist must be updated to $VERSION before merging."
-              exit 1
-            fi
-
-            echo "✅ Version $VERSION matches Info.plist"
+            python3 tools/check-version.py "$VERSION"
           fi
 
           echo "✅ PR title format is valid"

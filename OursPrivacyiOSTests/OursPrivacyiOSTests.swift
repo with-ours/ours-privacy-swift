@@ -26,6 +26,16 @@ struct OursPrivacyiOSTests {
         #expect(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
     }
 
+    @Test @MainActor func defaultPropertiesDoNotWaitOnMainFromTrackingQueue() {
+        AutomaticProperties.primeUIPropertiesIfOnMain()
+        let finished = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            #expect(AutomaticProperties.defaultProperties["screen_width"] != nil)
+            finished.signal()
+        }
+        #expect(finished.wait(timeout: .now() + .seconds(1)) == .success)
+    }
+
     @Test func optedOutByDefaultRespectsPersistedOptIn() async throws {
         let op = OursPrivacy(token: "ios-test-\(UUID().uuidString)", trackAutomaticEvents: false)
         op.optInTracking()

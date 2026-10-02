@@ -75,9 +75,7 @@ class Track {
         )
 
         var defaultProperties: InternalProperties = [:]
-        AutomaticProperties.automaticPropertiesLock.read {
-            defaultProperties += AutomaticProperties.defaultProperties
-        }
+        defaultProperties += AutomaticProperties.defaultProperties
         defaultProperties += context.attributionDefaultProperties
 
         let item: InternalProperties = [
@@ -86,7 +84,7 @@ class Track {
             "distinct_id": distinctId,
             "eventProperties": mergedEventProperties.isEmpty ? NSNull() : mergedEventProperties,
             "userProperties": mergedUserProperties ?? NSNull(),
-            "defaultProperties": defaultProperties,
+            "defaultProperties": defaultProperties
         ]
         return item
     }
@@ -106,9 +104,7 @@ class Track {
         )
 
         var defaultProperties: InternalProperties = [:]
-        AutomaticProperties.automaticPropertiesLock.read {
-            defaultProperties += AutomaticProperties.defaultProperties
-        }
+        defaultProperties += AutomaticProperties.defaultProperties
         defaultProperties += context.attributionDefaultProperties
 
         return [
@@ -117,7 +113,7 @@ class Track {
             "distinct_id": UUID().uuidString,
             "eventProperties": NSNull(),
             "userProperties": merged ?? NSNull(),
-            "defaultProperties": defaultProperties,
+            "defaultProperties": defaultProperties
         ]
     }
 

@@ -18,13 +18,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  ci:
+    if: >
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.merged == true &&
+       (startsWith(github.event.pull_request.title, 'release:') ||
+        startsWith(github.event.pull_request.title, 'release(')))
+    uses: $/.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   build:
     name: Build & Test
-    runs-on: macos-latest
-    if: >
-      (github.event_name == 'workflow_dispatch') ||
-      (github.event.pull_request.merged == true &&
-       startsWith(github.event.pull_request.title, 'release:'))
+    runs-on: macos-26
+    needs: ci
     permissions:
       contents: read
     outputs:
@@ -34,6 +42,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Select Xcode 26.5
+        run: sudo xcode-select -s /Applications/Xcode_26.5.app
 
       - name: Extract version
         id: version
@@ -45,7 +56,7 @@ jobs:
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             VERSION="$INPUT_VERSION"
           else
-            VERSION=$(echo "$PR_TITLE" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+            VERSION=$(echo "$PR_TITLE" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
           fi
 
           if [ -z "$VERSION" ]; then
@@ -53,23 +64,19 @@ jobs:
             exit 1
           fi
 
-          PLIST_VERSION=$(grep -A1 "CFBundleShortVersionString" Info.plist | tail -1 | sed -E 's/.*<string>([^<]+)<\/string>.*/\1/')
-          if [ "$PLIST_VERSION" != "$VERSION" ]; then
-            echo "Info.plist CFBundleShortVersionString ($PLIST_VERSION) does not match release version ($VERSION)"
-            exit 1
-          fi
+          python3 tools/check-version.py "$VERSION"
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "Building version: $VERSION"
 
-      - run: swift build
+      - run: swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
 
-      - run: swift test
+      - run: swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
 
   publish:
     name: Publish
-    runs-on: macos-latest
+    runs-on: macos-26
     needs: build
     permissions:
       contents: write # push release tag, create GitHub release

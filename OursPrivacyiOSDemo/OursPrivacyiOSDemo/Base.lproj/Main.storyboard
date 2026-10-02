@@ -130,6 +130,7 @@
                     <connections>
                         <outlet property="btnBlue" destination="INS-5v-LZH" id="Xu0-7G-zKg"/>
                         <outlet property="btnGreen" destination="fba-0a-WD0" id="tQc-2i-YH9"/>
+                        <outlet property="btnStart" destination="wom-ug-qlu" id="Z9A-1a-sTa"/>
                         <outlet property="btnRed" destination="7Jt-p0-RTZ" id="mZt-9z-ncE"/>
                         <outlet property="btnYellow" destination="poS-BP-vgC" id="dfg-5z-5Di"/>
                         <outlet property="txtId" destination="71C-nB-LhV" id="gLH-Yl-hDF"/>

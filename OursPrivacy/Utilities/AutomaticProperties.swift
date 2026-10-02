@@ -21,37 +21,16 @@ import WatchKit
 /// `martech/packages/types/src/event.ts`. Unknown keys are stripped server-side,
 /// so anything added here without a matching schema field is dead weight.
 class AutomaticProperties {
-    static let automaticPropertiesLock = ReadWriteLock(label: "automaticPropertiesLock")
+    static let sdkVersion = "3.0.0"
 
-    static var defaultProperties: InternalProperties = {
+    static var defaultProperties: InternalProperties {
         var p = InternalProperties()
         p["device_vendor"] = "Apple"
         p["device_model"] = AutomaticProperties.deviceModel()
-        p["version"] = "swift@\(AutomaticProperties.libVersion())"
+        p["version"] = "swift@\(sdkVersion)"
 
-        #if os(iOS) || os(tvOS)
-            let screenSize = UIScreen.main.bounds.size
-            p["screen_width"] = Int(screenSize.width)
-            p["screen_height"] = Int(screenSize.height)
-            #if targetEnvironment(macCatalyst)
-                p["device_type"] = "desktop"
-                p["os_name"] = "macOS"
-                p["os_version"] = ProcessInfo.processInfo.operatingSystemVersionString
-            #else
-                if AutomaticProperties.isiOSAppOnMac() {
-                    p["device_type"] = "desktop"
-                    p["os_name"] = "macOS"
-                    // No reliable os_version for "Designed for iPad" apps on macOS — omit.
-                } else {
-                    #if os(tvOS)
-                    p["device_type"] = "tv"
-                    #else
-                    p["device_type"] = "mobile"
-                    #endif
-                    p["os_name"] = UIDevice.current.systemName
-                    p["os_version"] = UIDevice.current.systemVersion
-                }
-            #endif
+        #if os(iOS) || os(tvOS) || os(visionOS)
+            p.merge(uiProperties()) { _, new in new }
         #elseif os(macOS)
             if let screenSize = NSScreen.main?.frame.size {
                 p["screen_width"] = Int(screenSize.width)
@@ -68,14 +47,87 @@ class AutomaticProperties {
             p["device_type"] = "watch"
             p["os_name"] = watchDevice.systemName
             p["os_version"] = watchDevice.systemVersion
+        #endif
+
+        return p
+    }
+
+    #if os(iOS) || os(tvOS) || os(visionOS)
+    private struct UIPropertiesSnapshot: @unchecked Sendable {
+        let values: InternalProperties
+    }
+
+    private final class UIPropertiesCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var snapshot: UIPropertiesSnapshot?
+
+        func read() -> UIPropertiesSnapshot? {
+            lock.lock()
+            defer { lock.unlock() }
+            return snapshot
+        }
+
+        func store(_ value: UIPropertiesSnapshot) {
+            lock.lock()
+            defer { lock.unlock() }
+            snapshot = value
+        }
+    }
+
+    private static let uiPropertiesCache = UIPropertiesCache()
+
+    static func primeUIPropertiesIfOnMain() {
+        guard Thread.isMainThread else { return }
+        _ = uiProperties()
+    }
+
+    private static func uiProperties() -> InternalProperties {
+        if Thread.isMainThread {
+            let snapshot = MainActor.assumeIsolated { UIPropertiesSnapshot(values: makeUIProperties()) }
+            uiPropertiesCache.store(snapshot)
+            return snapshot.values
+        }
+        let snapshot = uiPropertiesCache.read()
+        DispatchQueue.main.async {
+            let refreshed = MainActor.assumeIsolated { UIPropertiesSnapshot(values: makeUIProperties()) }
+            uiPropertiesCache.store(refreshed)
+        }
+        return snapshot?.values ?? [:]
+    }
+
+    @MainActor
+    private static func makeUIProperties() -> InternalProperties {
+        var p: InternalProperties = [:]
+        #if os(iOS) || os(tvOS)
+            let screenSize = UIScreen.main.bounds.size
+            p["screen_width"] = Int(screenSize.width)
+            p["screen_height"] = Int(screenSize.height)
+            #if targetEnvironment(macCatalyst)
+                p["device_type"] = "desktop"
+                p["os_name"] = "macOS"
+                p["os_version"] = ProcessInfo.processInfo.operatingSystemVersionString
+            #else
+                if isiOSAppOnMac() {
+                    p["device_type"] = "desktop"
+                    p["os_name"] = "macOS"
+                } else {
+                    #if os(tvOS)
+                    p["device_type"] = "tv"
+                    #else
+                    p["device_type"] = "mobile"
+                    #endif
+                    p["os_name"] = UIDevice.current.systemName
+                    p["os_version"] = UIDevice.current.systemVersion
+                }
+            #endif
         #elseif os(visionOS)
             p["device_type"] = "headset"
             p["os_name"] = "visionOS"
             p["os_version"] = UIDevice.current.systemVersion
         #endif
-
         return p
-    }()
+    }
+    #endif
 
     class func deviceModel() -> String {
         var modelCode: String = "Unknown"
@@ -106,7 +158,4 @@ class AutomaticProperties {
         return isiOSAppOnMac
     }
 
-    class func libVersion() -> String {
-        return "4.3.1"
-    }
 }

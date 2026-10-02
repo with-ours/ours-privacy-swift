@@ -1,0 +1,3 @@
+--swift-version 5.10
+--disable all
+--enable trailingSpace,consecutiveBlankLines,spaceAroundOperators,spaceAroundParens,braces

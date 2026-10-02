@@ -2,7 +2,17 @@
 
 Tiny tools for capturing what the SDK posts to the ingest endpoint, and diffing those captures against a fixture file.
 
-Used as a dogfood loop for verifying the SDK's wire shape against the ingest endpoint's expected envelope (`{eventName, eventProperties, userProperties, defaultProperties}`).
+Used to verify the SDK's `{token, is_manually_set_id, data}` ingest envelope. Each `data` item includes `event`, `eventProperties`, `userProperties`, and `defaultProperties`.
+
+## One-command demo E2E
+
+With Xcode 26.5 and its iOS 26.5 simulator runtime installed, run from the repository root:
+
+```sh
+./tools/payload-recorder/run-ios-e2e.sh
+```
+
+The script starts this recorder and runs the demo's XCUITest suite on iPhone 17 Pro. CI runs the same command. It requires no account. Each run saves captures in a separate directory under `tools/payload-recorder/captures/`; the command prints its exact path.
 
 ## Capture
 
@@ -13,13 +23,7 @@ python3 tools/payload-recorder/server.py
 # [recorder] listening on http://localhost:8765 -> captures/
 ```
 
-Point the demo app at it:
-
-```swift
-OursPrivacy.mainInstance().setServerURL("http://localhost:8765")
-OursPrivacy.mainInstance().track(event: "Sign Up", properties: ["source": "test"])
-OursPrivacy.mainInstance().flush()
-```
+Point the SDK at it with `OursPrivacyInitOptions(serverURL: "http://127.0.0.1:8765")`, then track and flush. `GET /captures` returns the captured envelopes as JSON for tests.
 
 Each POST body is written as pretty-printed JSON to `captures/<timestamp>-<seq><path>.json`.
 

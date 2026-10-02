@@ -8,6 +8,17 @@
 version: 2
 updates:
 
+  - package-ecosystem: "swift"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "fix"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
