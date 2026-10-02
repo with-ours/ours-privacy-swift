@@ -273,6 +273,9 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
         flushInstance = Flush(serverURL: self.serverURL)
         trackInstance = Track()
         trackInstance.oursprivacyInstance = self
+#if os(iOS) || os(tvOS) || os(visionOS)
+        AutomaticProperties.primeUIPropertiesIfOnMain()
+#endif
         flushInstance.delegate = self
         if startFlushTimer {
             flushInstance.flushInterval = flushInterval
@@ -531,6 +534,9 @@ extension OursPrivacy {
             }
             return
         }
+#if os(iOS) || os(tvOS) || os(visionOS)
+        AutomaticProperties.primeUIPropertiesIfOnMain()
+#endif
         enqueueIdentify(PropertySnapshot(userProperties?.toWireProperties()), completion: completion)
     }
 
@@ -751,6 +757,9 @@ extension OursPrivacy {
                       properties: Properties? = nil,
                       userProperties: Properties? = nil) {
         OursPrivacyLogger.debug(message: "Tracking \(event ?? "nil")")
+#if os(iOS) || os(tvOS) || os(visionOS)
+        AutomaticProperties.primeUIPropertiesIfOnMain()
+#endif
         let capturedProperties = PropertySnapshot(properties)
         let capturedUserProperties = PropertySnapshot(userProperties)
         trackingQueue.async { [weak self, event, capturedProperties, capturedUserProperties] in

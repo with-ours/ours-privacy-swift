@@ -8,10 +8,12 @@ recorder_url="http://127.0.0.1:8765"
 capture_root="$repo_root/tools/payload-recorder/captures"
 run_dir="$(mktemp -d /tmp/ours-swift-e2e.XXXXXX)"
 mkdir -p "$capture_root"
+echo "Recorder capture root: $capture_root"
 capture_dir="$(mktemp -d "$capture_root/run.XXXXXX")"
 
 python3 tools/payload-recorder/server.py --port 8765 --out "$capture_dir" > "$run_dir/recorder.log" 2>&1 &
 recorder_pid=$!
+echo "Started recorder with PID $recorder_pid"
 xcode_pid=""
 cleanup() {
     if [[ -n "$xcode_pid" ]]; then
@@ -28,20 +30,28 @@ trap 'exit 143' TERM
 ready=0
 for attempt in {1..30}; do
     if ! kill -0 "$recorder_pid" 2>/dev/null; then
-        cat "$run_dir/recorder.log"
+        echo "Recorder exited before becoming ready" >&2
+        cat "$run_dir/recorder.log" >&2
         exit 1
     fi
     if grep -qF '[recorder] listening' "$run_dir/recorder.log" &&
-        curl --silent --fail "$recorder_url/captures" > /dev/null; then
+        curl --noproxy "*" --max-time 2 --silent --fail "$recorder_url/captures" > /dev/null; then
         ready=1
         break
     fi
     sleep 1
 done
 if [[ "$ready" -ne 1 ]]; then
-    cat "$run_dir/recorder.log"
+    echo "Recorder did not become ready after 30 seconds" >&2
+    echo "Recorder process:" >&2
+    ps -p "$recorder_pid" -o pid=,stat=,command= >&2 || true
+    echo "Recorder log:" >&2
+    cat "$run_dir/recorder.log" >&2
+    echo "Recorder endpoint:" >&2
+    curl --noproxy "*" --max-time 2 --show-error --fail "$recorder_url/captures" >&2 || true
     exit 1
 fi
+echo "Recorder ready at $recorder_url"
 
 xcodebuild test \
     -project OursPrivacyiOSDemo/OursPrivacyiOSDemo.xcodeproj \

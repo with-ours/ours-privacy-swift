@@ -53,18 +53,46 @@ class AutomaticProperties {
     }
 
     #if os(iOS) || os(tvOS) || os(visionOS)
-    // The main actor builds this snapshot from immutable strings and integers before it crosses queues.
     private struct UIPropertiesSnapshot: @unchecked Sendable {
         let values: InternalProperties
     }
 
+    private final class UIPropertiesCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var snapshot: UIPropertiesSnapshot?
+
+        func read() -> UIPropertiesSnapshot? {
+            lock.lock()
+            defer { lock.unlock() }
+            return snapshot
+        }
+
+        func store(_ value: UIPropertiesSnapshot) {
+            lock.lock()
+            defer { lock.unlock() }
+            snapshot = value
+        }
+    }
+
+    private static let uiPropertiesCache = UIPropertiesCache()
+
+    static func primeUIPropertiesIfOnMain() {
+        guard Thread.isMainThread else { return }
+        _ = uiProperties()
+    }
+
     private static func uiProperties() -> InternalProperties {
         if Thread.isMainThread {
-            return MainActor.assumeIsolated { UIPropertiesSnapshot(values: makeUIProperties()) }.values
+            let snapshot = MainActor.assumeIsolated { UIPropertiesSnapshot(values: makeUIProperties()) }
+            uiPropertiesCache.store(snapshot)
+            return snapshot.values
         }
-        return DispatchQueue.main.sync {
-            MainActor.assumeIsolated { UIPropertiesSnapshot(values: makeUIProperties()) }
-        }.values
+        let snapshot = uiPropertiesCache.read()
+        DispatchQueue.main.async {
+            let refreshed = MainActor.assumeIsolated { UIPropertiesSnapshot(values: makeUIProperties()) }
+            uiPropertiesCache.store(refreshed)
+        }
+        return snapshot?.values ?? [:]
     }
 
     @MainActor
