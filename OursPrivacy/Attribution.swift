@@ -16,7 +16,7 @@ private let utmParams: [String] = [
     "utm_medium",
     "utm_name",
     "utm_source",
-    "utm_term",
+    "utm_term"
 ]
 
 private let clickIds: [String] = [
@@ -45,7 +45,7 @@ private let clickIds: [String] = [
     "sccid",
     "ttclid",
     "twclid",
-    "wbraid",
+    "wbraid"
 ]
 
 private let oursVisitorIdParam = "ours_visitor_id"

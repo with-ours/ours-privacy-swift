@@ -16,7 +16,28 @@ enum FlushType: String {
     case events = "/ingest"
 }
 
-class FlushRequest: Network {
+private final class RequestCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private let semaphore = DispatchSemaphore(value: 0)
+    private var result = false
+
+    func finish(_ success: Bool) {
+        lock.lock()
+        result = success
+        lock.unlock()
+        semaphore.signal()
+    }
+
+    func wait() -> Bool {
+        _ = semaphore.wait(timeout: .now() + 120)
+        lock.lock()
+        defer { lock.unlock() }
+        return result
+    }
+}
+
+// The network queue waits for each URLSession callback before issuing another request.
+class FlushRequest: Network, @unchecked Sendable {
 
     var networkRequestsAllowedAfterTime = 0.0
     var networkConsecutiveFailures = 0
@@ -25,7 +46,7 @@ class FlushRequest: Network {
                      type: FlushType,
                      headers: [String: String],
                      queryItems: [URLQueryItem] = []) -> Bool {
-        
+
         OursPrivacyLogger.debug(message: "sendRequest: type \(type), data: \(requestData)")
 
 //        let responseParser: (Data) -> Int? = { data in
@@ -35,23 +56,22 @@ class FlushRequest: Network {
 //            }
 //            return nil
 //        }
-        
-        let responseParser: (Data) -> OursResponse = { data in
+
+        let responseParser: @Sendable (Data) -> OursResponse = { data in
             var finalResponse = OursResponse(success: false)
             do {
                 let responseJson = try JSONSerialization.jsonObject(with: data, options: [])
                 if let dictionary = responseJson as? [String: Any] {
                     finalResponse = OursResponse(success: dictionary["success"] as? Bool ?? false)
                 }
-            }
-            catch {
+            } catch {
                 // return default
             }
             return finalResponse
-            
+
         }
-        
-        let resourceHeaders: [String: String] = ["Content-Type": "application/json"].merging(headers) {(_,new) in new }
+
+        let resourceHeaders: [String: String] = ["Content-Type": "application/json"].merging(headers) {(_, new) in new }
 
         var resourceQueryItems: [URLQueryItem] = []
         resourceQueryItems.append(contentsOf: queryItems)
@@ -61,22 +81,18 @@ class FlushRequest: Network {
                                              queryItems: resourceQueryItems,
                                              headers: resourceHeaders,
                                              parse: responseParser)
-        var result = false
-        let semaphore = DispatchSemaphore(value: 0)
+        let completion = RequestCompletion()
         flushRequestHandler(serverURL,
                             resource: resource,
                             completion: { success in
-                                result = success
-                                semaphore.signal()
+                                completion.finish(success)
         })
-        _ = semaphore.wait(timeout: .now() + 120.0)
-        return result
+        return completion.wait()
     }
-
 
     private func flushRequestHandler(_ base: String,
                                      resource: Resource<OursResponse>,
-                                     completion: @escaping (Bool) -> Void) {
+                                     completion: @escaping @Sendable (Bool) -> Void) {
 
         Network.apiRequest(base: base, resource: resource,
             failure: { (reason, _, response) in
@@ -110,7 +126,7 @@ class FlushRequest: Network {
     }
 
     private func retryBackOffTimeWithConsecutiveFailures(_ failureCount: Int) -> TimeInterval {
-        let time = pow(2.0, Double(failureCount) - 1) * 60 + Double(arc4random_uniform(30))
+        let time = pow(2.0, Double(failureCount) - 1) * 60 + Double(Int.random(in: 0 ..< 30))
         return min(max(APIConstants.minRetryBackoff, time),
                    APIConstants.maxRetryBackoff)
     }
@@ -120,4 +136,3 @@ class FlushRequest: Network {
     }
 
 }
-

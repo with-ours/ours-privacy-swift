@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_call:
 
 permissions:
   contents: read
@@ -14,42 +17,123 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  test:
-    name: Test
-    runs-on: macos-latest
-    timeout-minutes: 15
+  static:
+    name: Package tests and static checks
+    runs-on: macos-26
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Select Xcode 26.5
+        run: sudo xcode-select -s /Applications/Xcode_26.5.app
+      - name: Check release version
+        run: python3 tools/check-version.py
+      - name: Test package with strict concurrency
+        run: swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
+      - name: Test payload recorder
+        run: python3 -m unittest discover -s tools/payload-recorder -p 'test_*.py'
+      - name: SwiftLint
+        run: swiftlint lint --strict --quiet
+      - name: SwiftFormat
+        run: swiftformat --lint Package.swift OursPrivacy OursPrivacyiOSTests OursPrivacyiOSDemo Tests tools/recorder-probe
 
-      - name: Show Swift / Xcode versions
-        run: |
-          swift --version
-          xcodebuild -version
-
-      - name: swift test
-        run: swift test
-
-  build-ios:
+  ios:
     name: Build (iOS)
-    runs-on: macos-latest
-    timeout-minutes: 15
+    runs-on: macos-26
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      # The framework's Swift module is named `OursPrivacyKit`
-      # (`PRODUCT_MODULE_NAME` + `PRODUCT_NAME`) while the public entry-point
-      # class stays `OursPrivacy`. With the name collision gone, library
-      # evolution stays on — the `.swiftinterface` verifier passes — and CI
-      # exercises the same build configuration as a release artifact.
-      - name: xcodebuild build (iOS Simulator, arm64)
+      - name: Select Xcode 26.5
+        run: sudo xcode-select -s /Applications/Xcode_26.5.app
+      - name: SDK release interface build
         run: |
           xcodebuild build \
             -project OursPrivacy.xcodeproj \
             -scheme OursPrivacy \
+            -configuration Release \
             -destination 'generic/platform=iOS Simulator' \
-            ONLY_ACTIVE_ARCH=YES \
-            ARCHS=arm64
+            CODE_SIGNING_ALLOWED=NO \
+            OTHER_SWIFT_FLAGS='-strict-concurrency=complete -warnings-as-errors'
+      - name: SDK simulator tests
+        run: |
+          xcodebuild test \
+            -project OursPrivacy.xcodeproj \
+            -scheme OursPrivacy \
+            -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO \
+            OTHER_SWIFT_FLAGS='-strict-concurrency=complete -warnings-as-errors'
+      - name: Demo simulator unit tests
+        run: |
+          xcodebuild test \
+            -project OursPrivacyiOSDemo/OursPrivacyiOSDemo.xcodeproj \
+            -scheme OursPrivacyiOSDemo \
+            -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+            -parallel-testing-enabled NO \
+            -only-testing:OursPrivacyiOSDemoTests \
+            CODE_SIGNING_ALLOWED=NO \
+            OTHER_SWIFT_FLAGS='-strict-concurrency=complete'
+
+  platforms:
+    name: Build (${{ matrix.platform }})
+    runs-on: macos-26
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: tvOS
+            triple: arm64-apple-tvos15.0-simulator
+            sdk: appletvsimulator
+          - platform: watchOS
+            triple: arm64-apple-watchos8.0-simulator
+            sdk: watchsimulator
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select Xcode 26.5
+        run: sudo xcode-select -s /Applications/Xcode_26.5.app
+      - name: Build package with strict concurrency
+        env:
+          TARGET_TRIPLE: ${{ matrix.triple }}
+          APPLE_SDK: ${{ matrix.sdk }}
+        run: |
+          swift build --target OursPrivacyKit \
+            --triple "$TARGET_TRIPLE" \
+            --sdk "$(xcrun --sdk "$APPLE_SDK" --show-sdk-path)" \
+            -Xswiftc -strict-concurrency=complete \
+            -Xswiftc -warnings-as-errors
+
+  e2e:
+    name: Demo recorder E2E
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select Xcode 26.5
+        run: sudo xcode-select -s /Applications/Xcode_26.5.app
+      - name: Run demo against payload recorder
+        run: ./tools/payload-recorder/run-ios-e2e.sh
+
+  required-checks:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: [static, ios, platforms, e2e]
+    if: always()
+    steps:
+      - name: Require all test and build jobs
+        env:
+          STATIC_RESULT: ${{ needs.static.result }}
+          IOS_RESULT: ${{ needs.ios.result }}
+          PLATFORMS_RESULT: ${{ needs.platforms.result }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+        run: |
+          for result in "$STATIC_RESULT" "$IOS_RESULT" "$PLATFORMS_RESULT" "$E2E_RESULT"; do
+            test "$result" = success
+          done

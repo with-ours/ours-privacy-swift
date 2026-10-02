@@ -8,12 +8,13 @@
 import Foundation
 
 protocol FlushDelegate: AnyObject {
-    func flush(performFullFlush: Bool, completion: (() -> Void)?)
+    func flush(performFullFlush: Bool, completion: (@Sendable () -> Void)?)
     func flushSuccess(type: FlushType, ids: [Int32])
     func flushEnvelopeContext() -> (token: String, isManuallySetId: Bool)
 }
 
-class Flush: AppLifecycle {
+// The timer stays on the main queue; URL and interval changes use flushRequestReadWriteLock.
+class Flush: AppLifecycle, @unchecked Sendable {
     var timer: Timer?
     weak var delegate: FlushDelegate?
     var flushRequest: FlushRequest
@@ -56,7 +57,10 @@ class Flush: AppLifecycle {
     required init(serverURL: String) {
         self.flushRequest = FlushRequest(serverURL: serverURL)
         _serverURL = serverURL
-        flushRequestReadWriteLock = DispatchQueue(label: "com.oursprivacy.flush_interval.lock", qos: .utility, attributes: .concurrent, autoreleaseFrequency: .workItem)
+        flushRequestReadWriteLock = DispatchQueue(label: "com.oursprivacy.flush_interval.lock",
+                                                   qos: .utility,
+                                                   attributes: .concurrent,
+                                                   autoreleaseFrequency: .workItem)
     }
 
     func flushQueue(_ queue: Queue, type: FlushType, headers: [String: String], queryItems: [URLQueryItem]) {
@@ -67,11 +71,11 @@ class Flush: AppLifecycle {
     }
 
     func startFlushTimer() {
-        stopFlushTimer()
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
+            self.timer?.invalidate()
+            self.timer = nil
             if self.flushInterval > 0 {
-                self.timer?.invalidate()
                 self.timer = Timer.scheduledTimer(timeInterval: self.flushInterval,
                                                   target: self,
                                                   selector: #selector(self.flushSelector),
@@ -86,11 +90,9 @@ class Flush: AppLifecycle {
     }
 
     func stopFlushTimer() {
-        if let timer = timer {
-            DispatchQueue.main.async { [weak self, timer] in
-                timer.invalidate()
-                self?.timer = nil
-            }
+        DispatchQueue.main.async { [weak self] in
+            self?.timer?.invalidate()
+            self?.timer = nil
         }
     }
 
@@ -118,7 +120,7 @@ class Flush: AppLifecycle {
             let envelope: InternalProperties = [
                 "token": context.token,
                 "is_manually_set_id": context.isManuallySetId,
-                "data": items,
+                "data": items
             ]
 
             guard let requestData = JSONHandler.encodeAPIData(envelope) else {

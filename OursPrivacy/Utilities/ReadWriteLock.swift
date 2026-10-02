@@ -9,7 +9,7 @@
 //
 import Foundation
 
-class ReadWriteLock {
+final class ReadWriteLock: @unchecked Sendable {
     private let concurrentQueue: DispatchQueue
 
     init(label: String) {

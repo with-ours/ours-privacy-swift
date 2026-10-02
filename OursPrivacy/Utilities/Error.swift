@@ -10,17 +10,14 @@
 
 import Foundation
 
-enum PropertyError: Error {
-    case invalidType(type: Any)
-}
-
 class Assertions {
-    static var assertClosure      = swiftAssertClosure
-    static let swiftAssertClosure = { Swift.assert($0, $1, file: $2, line: $3) }
+    static let assertClosure: @Sendable (Bool, String, StaticString, UInt) -> Void = {
+        Swift.assert($0, $1, file: $2, line: $3)
+    }
 }
 
-func MPAssert(_ condition: @autoclosure() -> Bool,
-              _ message: @autoclosure() -> String = "",
+func MPAssert(_ condition: @autoclosure () -> Bool,
+              _ message: @autoclosure () -> String = "",
               file: StaticString = #file,
               line: UInt = #line) {
     Assertions.assertClosure(condition(), message(), file, line)
