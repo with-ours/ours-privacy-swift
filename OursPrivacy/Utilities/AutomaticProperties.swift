@@ -76,6 +76,20 @@ class AutomaticProperties {
 
     private static let uiPropertiesCache = UIPropertiesCache()
 
+    static func prepareUIProperties(beforeProcessing queue: DispatchQueue) {
+        if Thread.isMainThread {
+            primeUIPropertiesIfOnMain()
+            return
+        }
+        // Gate the first event (including automatic events) without blocking its caller
+        // or reordering track, identify, opt-out, and flush operations.
+        queue.suspend()
+        DispatchQueue.main.async {
+            primeUIPropertiesIfOnMain()
+            queue.resume()
+        }
+    }
+
     static func primeUIPropertiesIfOnMain() {
         guard Thread.isMainThread else { return }
         _ = uiProperties()

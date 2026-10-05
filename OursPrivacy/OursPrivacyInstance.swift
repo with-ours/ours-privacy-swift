@@ -113,11 +113,27 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
     /// Stable per-install identifier sent as `visitor_id` on every event.
     /// Generated lazily on first launch and persisted in NSUserDefaults
     /// under the OursPrivacy suite. Reset by ``reset(completion:)``.
-    open internal(set) var visitorId: String = ""
+    open internal(set) var visitorId: String {
+        get {
+            var value = ""
+            readWriteLock.read { value = _visitorId }
+            return value
+        }
+        set { readWriteLock.write { _visitorId = newValue } }
+    }
+    private var _visitorId = ""
 
     /// True only when the host explicitly called ``setVisitorId(_:)``.
     /// Forwarded as the top-level `is_manually_set_id` envelope field.
-    open internal(set) var isManuallySetId: Bool = false
+    open internal(set) var isManuallySetId: Bool {
+        get {
+            var value = false
+            readWriteLock.read { value = _isManuallySetId }
+            return value
+        }
+        set { readWriteLock.write { _isManuallySetId = newValue } }
+    }
+    private var _isManuallySetId = false
 
     let oursprivacyPersistence: OursPrivacyPersistence
 
@@ -274,7 +290,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
         trackInstance = Track()
         trackInstance.oursprivacyInstance = self
 #if os(iOS) || os(tvOS) || os(visionOS)
-        AutomaticProperties.primeUIPropertiesIfOnMain()
+        AutomaticProperties.prepareUIProperties(beforeProcessing: trackingQueue)
 #endif
         flushInstance.delegate = self
         if startFlushTimer {
@@ -414,7 +430,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
         var consentSnapshot: InternalProperties = [:]
         var attributionSnapshot: InternalProperties = [:]
         readWriteLock.read {
-            visitorIdSnapshot = visitorId
+            visitorIdSnapshot = _visitorId
             defaultEventSnapshot = defaultEventProperties
             customSnapshot = userCustomProperties
             consentSnapshot = userConsentProperties
@@ -430,7 +446,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
     func archive() {
         readWriteLock.read {
             OursPrivacyPersistence.saveIdentity(
-                OursPrivacyIdentity(visitorId: visitorId, isManuallySetId: isManuallySetId),
+                OursPrivacyIdentity(visitorId: _visitorId, isManuallySetId: _isManuallySetId),
                 instanceName: self.name)
         }
     }
@@ -439,15 +455,15 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
         readWriteLock.write {
             optOutStatus = OursPrivacyPersistence.loadOptOutStatusFlag(instanceName: self.name)
             let identity = OursPrivacyPersistence.loadIdentity(instanceName: self.name)
-            visitorId = identity.visitorId
-            isManuallySetId = identity.isManuallySetId
-            if visitorId.isEmpty {
-                visitorId = newVisitorId()
+            _visitorId = identity.visitorId
+            _isManuallySetId = identity.isManuallySetId
+            if _visitorId.isEmpty {
+                _visitorId = newVisitorId()
             }
         }
         readWriteLock.read {
             OursPrivacyPersistence.saveIdentity(
-                OursPrivacyIdentity(visitorId: visitorId, isManuallySetId: isManuallySetId),
+                OursPrivacyIdentity(visitorId: _visitorId, isManuallySetId: _isManuallySetId),
                 instanceName: self.name)
         }
     }
@@ -501,8 +517,7 @@ extension OursPrivacy {
     /// Returns the current visitor ID, or `nil` if the SDK hasn't generated
     /// one yet (the typical case is before the first `identify` / `track`).
     public func getVisitorId() -> String? {
-        var current = ""
-        readWriteLock.read { current = visitorId }
+        let current = visitorId
         return current.isEmpty ? nil : current
     }
 
@@ -516,8 +531,8 @@ extension OursPrivacy {
             return
         }
         readWriteLock.write {
-            self.visitorId = visitorId
-            self.isManuallySetId = true
+            self._visitorId = visitorId
+            self._isManuallySetId = true
         }
         archive()
     }
@@ -565,8 +580,8 @@ extension OursPrivacy {
             guard let self = self else { return }
             OursPrivacyPersistence.deleteUserDefaultsData(instanceName: self.name)
             self.readWriteLock.write {
-                self.visitorId = self.newVisitorId()
-                self.isManuallySetId = false
+                self._visitorId = self.newVisitorId()
+                self._isManuallySetId = false
                 self.defaultEventProperties = [:]
                 self.userCustomProperties = [:]
                 self.userConsentProperties = [:]
@@ -729,7 +744,7 @@ extension OursPrivacy {
     func flushEnvelopeContext() -> (token: String, isManuallySetId: Bool) {
         var manualSnapshot = false
         readWriteLock.read {
-            manualSnapshot = self.isManuallySetId
+            manualSnapshot = self._isManuallySetId
         }
         return (apiToken, manualSnapshot)
     }
@@ -791,8 +806,8 @@ extension OursPrivacy {
         trackingQueue.async { [weak self] in
             guard let self = self else { return }
             self.readWriteLock.write {
-                self.visitorId = self.newVisitorId()
-                self.isManuallySetId = false
+                self._visitorId = self.newVisitorId()
+                self._isManuallySetId = false
                 self.defaultEventProperties = [:]
                 self.userCustomProperties = [:]
                 self.userConsentProperties = [:]
