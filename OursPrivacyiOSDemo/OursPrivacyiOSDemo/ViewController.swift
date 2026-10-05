@@ -15,20 +15,85 @@ class ViewController: UIViewController {
     @IBOutlet weak var btnBlue: UIButton!
     @IBOutlet weak var btnRed: UIButton!
     @IBOutlet weak var btnGreen: UIButton!
+    @IBOutlet weak var btnStart: UIButton!
+
+    private var actionButtons: [UIButton] = []
 
     private var op: OursPrivacy? { AppDelegate.shared.oursPrivacy }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         txtToken.text = op?.apiToken ?? ""
+        txtId.accessibilityIdentifier = "userId"
+        txtResults.accessibilityIdentifier = "results"
+        btnStart.accessibilityIdentifier = "start"
+        btnStart.isEnabled = AppDelegate.shared.sdkReady
+        btnYellow.accessibilityIdentifier = "sendYellow"
+        btnBlue.accessibilityIdentifier = "sendBlue"
+        btnRed.accessibilityIdentifier = "sendRed"
+        btnGreen.accessibilityIdentifier = "sendGreen"
+        configureActionButtons()
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(sdkDidBecomeReady),
+                                               name: AppDelegate.sdkReadyNotification,
+                                               object: nil)
+        if AppDelegate.shared.sdkReady {
+            sdkDidBecomeReady()
+        }
         appendResult("Demo loaded. Visitor: \(op?.getVisitorId() ?? "nil")")
         appendResult("Opted out: \(op?.hasOptedOutTracking() == true)")
+    }
+
+    @objc private func sdkDidBecomeReady() {
+        btnStart.isEnabled = true
+        actionButtons.forEach { $0.isEnabled = true }
+        appendResult("SDK ready")
+    }
+
+    private func configureActionButtons() {
+        let deepLink = makeActionButton("Deep Link", identifier: "sendDeepLink", action: #selector(sendDeepLink(_:)))
+        let optOut = makeActionButton("Opt Out", identifier: "optOut", action: #selector(optOut(_:)))
+        let optIn = makeActionButton("Opt In", identifier: "optIn", action: #selector(optIn(_:)))
+        let flush = makeActionButton("Flush", identifier: "flush", action: #selector(flush(_:)))
+        actionButtons = [deepLink, optOut, optIn, flush]
+
+        let topRow = UIStackView(arrangedSubviews: [deepLink, optOut])
+        let bottomRow = UIStackView(arrangedSubviews: [optIn, flush])
+        for row in [topRow, bottomRow] {
+            row.distribution = .fillEqually
+            row.spacing = 10
+        }
+        let stack = UIStackView(arrangedSubviews: [topRow, bottomRow])
+        stack.axis = .vertical
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        view.constraints
+            .filter { ($0.firstItem as? UIView) === txtResults && $0.firstAttribute == .top }
+            .forEach { $0.isActive = false }
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: txtResults.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: txtResults.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: btnRed.bottomAnchor, constant: 10),
+            topRow.heightAnchor.constraint(equalToConstant: 35),
+            bottomRow.heightAnchor.constraint(equalToConstant: 35),
+            txtResults.topAnchor.constraint(equalTo: stack.bottomAnchor, constant: 10)
+        ])
+    }
+
+    private func makeActionButton(_ title: String, identifier: String, action: Selector) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setTitle(title, for: .normal)
+        button.accessibilityIdentifier = identifier
+        button.isEnabled = AppDelegate.shared.sdkReady
+        button.addTarget(self, action: action, for: .touchUpInside)
+        return button
     }
 
     // MARK: - Identify + default properties
 
     @IBAction func start(_ sender: Any) {
-        guard let op = op else { return }
+        guard AppDelegate.shared.sdkReady, let op = op else { return }
         let externalId = txtId.text?.isEmpty == false ? txtId.text! : "demo_user"
 
         op.updateDefaultEventProperties(["app_section": "demo"])
@@ -60,7 +125,7 @@ class ViewController: UIViewController {
                 "test": "data",
                 "testInt": 42,
                 "boolean": true,
-                "double": 42.42,
+                "double": 42.42
             ]
             op.track(event: event, properties: props)
         } else {

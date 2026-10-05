@@ -187,7 +187,7 @@ class OursPrivacyPersistence {
             OursPrivacyUserDefaultsKeys.legacyAlias,
             OursPrivacyUserDefaultsKeys.legacyHadPersistedDistinctId,
             OursPrivacyUserDefaultsKeys.legacyTimedEvents,
-            OursPrivacyUserDefaultsKeys.legacySuperProperties,
+            OursPrivacyUserDefaultsKeys.legacySuperProperties
         ] {
             defaults.removeObject(forKey: "\(prefix)\(key)")
         }
@@ -210,10 +210,9 @@ class OursPrivacyPersistence {
         guard let directory = manager.urls(for: .cachesDirectory, in: .userDomainMask).last else { return }
 #endif
         let basePath = directory.appendingPathComponent("\(sanitized)_OPDB.sqlite").path
-        for path in [basePath, basePath + "-wal", basePath + "-shm"] {
-            if manager.fileExists(atPath: path) {
-                try? manager.removeItem(atPath: path)
-            }
+        for path in [basePath, basePath + "-wal", basePath + "-shm"]
+            where manager.fileExists(atPath: path) {
+            try? manager.removeItem(atPath: path)
         }
     }
 

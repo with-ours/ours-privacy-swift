@@ -1,4 +1,4 @@
-// swift-tools-version:5.3
+// swift-tools-version:6.0
 
 import PackageDescription
 
@@ -8,10 +8,10 @@ import PackageDescription
 let package = Package(
     name: "OursPrivacyKit",
     platforms: [
-      .iOS(.v13),
-      .tvOS(.v13),
-      .macOS(.v10_15),
-      .watchOS(.v6)
+      .iOS(.v15),
+      .tvOS(.v15),
+      .macOS(.v12),
+      .watchOS(.v8)
     ],
     products: [
         .library(name: "OursPrivacyKit", targets: ["OursPrivacyKit"])
@@ -30,10 +30,11 @@ let package = Package(
             dependencies: ["OursPrivacyKit"],
             path: "Tests/OursPrivacyTests"
         ),
-        .target(
+        .executableTarget(
             name: "RecorderProbe",
             dependencies: ["OursPrivacyKit"],
             path: "tools/recorder-probe"
         )
-    ]
+    ],
+    swiftLanguageModes: [.v5]
 )

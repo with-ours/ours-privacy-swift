@@ -9,6 +9,8 @@ import OursPrivacyKit
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
+    static let sdkReadyNotification = Notification.Name("OursPrivacyDemoSDKReady")
+
     static var shared: AppDelegate {
         UIApplication.shared.delegate as! AppDelegate
     }
@@ -17,6 +19,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// Constructed in `didFinishLaunching`; ``initialize(optOutTrackingDefault:options:)``
     /// is awaited from a `Task` so the app delegate can stay sync.
     var oursPrivacy: OursPrivacy?
+    private(set) var sdkReady = false
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
@@ -33,6 +36,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                                                                 optedOutByDefault: optedOutByDefault))
             op.setLoggingEnabled(true)
             op.flushInterval = 10.0
+            sdkReady = true
+            NotificationCenter.default.post(name: Self.sdkReadyNotification, object: nil)
         }
         return true
     }

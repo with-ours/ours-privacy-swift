@@ -218,7 +218,7 @@ final class OursPrivacyTests: XCTestCase {
         let p = AutomaticProperties.defaultProperties
         XCTAssertNotNil(p["device_vendor"])
         XCTAssertNotNil(p["device_model"])
-        XCTAssertEqual(p["version"] as? String, "swift@\(AutomaticProperties.libVersion())")
+        XCTAssertEqual(p["version"] as? String, "swift@3.0.0")
         // device_type / os_name / os_version / screen_* depend on the host
         // platform; at minimum the cross-platform anchors must be present.
         // Legacy dollar-prefixed / snake_case keys must be absent.
@@ -420,6 +420,37 @@ final class OursPrivacyTests: XCTestCase {
 
     // MARK: - trackDeepLink
 
+    func testTrackSnapshotsMutablePropertyBeforeQueuing() {
+        let op = makeInstance()
+        let mutableValue = NSMutableString(string: "before")
+        op.trackingQueue.suspend()
+        op.track(event: "Snapshot", properties: ["value": mutableValue])
+        mutableValue.setString("after")
+        op.trackingQueue.resume()
+        op.trackingQueue.sync {}
+
+        let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let properties = events.first?["eventProperties"] as? [String: Any]
+        XCTAssertEqual(properties?["value"] as? String, "before")
+    }
+
+    func testTrackSnapshotPreservesNestedUserProperties() {
+        let op = makeInstance()
+        let user = OursPrivacyUserProperties(
+            externalId: "customer-1",
+            customProperties: ["tier": "pro"],
+            consent: ["analytics": true]
+        )
+        op.track(event: "Purchase", properties: ["sku": "A"], userProperties: user)
+        op.trackingQueue.sync {}
+
+        let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let properties = events.first?["userProperties"] as? [String: Any]
+        XCTAssertEqual(properties?["external_id"] as? String, "customer-1")
+        XCTAssertEqual((properties?["custom_properties"] as? [String: Any])?["tier"] as? String, "pro")
+        XCTAssertEqual((properties?["consent"] as? [String: Any])?["analytics"] as? Bool, true)
+    }
+
     func testTrackDeepLinkReplacesAttributionDefaults() {
         let op = makeInstance()
         op.trackDeepLink("https://app.example.com/?utm_source=first&fbclid=stale")
@@ -476,7 +507,7 @@ final class OursPrivacyTests: XCTestCase {
             "distinct_id": "d-\(UUID().uuidString)",
             "eventProperties": ["k": "v"] as InternalProperties,
             "userProperties": NSNull(),
-            "defaultProperties": [:] as InternalProperties,
+            "defaultProperties": [:] as InternalProperties
         ]
     }
 

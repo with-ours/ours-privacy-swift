@@ -22,9 +22,9 @@ class JSONHandler {
             return nil
         }
 
-        return String(decoding: d, as: UTF8.self)
+        return String(bytes: d, encoding: .utf8)
     }
-    
+
     class func deserializeData(_ data: Data) -> MPObjectToParse? {
         var object: MPObjectToParse?
         do {
@@ -44,12 +44,12 @@ class JSONHandler {
         } else {
             serializableJSONObject = makeObjectSerializable(obj)
         }
-        
+
         guard JSONSerialization.isValidJSONObject(serializableJSONObject) else {
             OursPrivacyLogger.warn(message: "object isn't valid and can't be serialzed to JSON")
             return nil
         }
-        
+
         var serializedObject: Data?
         do {
             serializedObject = try JSONSerialization
@@ -80,13 +80,13 @@ class JSONHandler {
 
         case let obj as Double where obj.isFinite && !obj.isNaN:
             return obj
-            
+
         case let obj as Float where obj.isFinite && !obj.isNaN:
             return obj
 
         case is String, is Int, is UInt, is UInt64, is Bool:
             return obj
-            
+
         case let obj as [Any?]:
             // nil values in Array properties are dropped
             let nonNilEls: [Any] = obj.compactMap({ $0 })

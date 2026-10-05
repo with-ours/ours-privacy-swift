@@ -12,7 +12,7 @@ import Foundation
 
 struct BasePath {
     static let DefaultAPIEndpoint = "https://cdn.oursprivacy.com"
-    
+
     static func buildURL(base: String, path: String, queryItems: [URLQueryItem]?) -> URL? {
         guard let url = URL(string: base) else {
             return nil
@@ -33,20 +33,20 @@ enum RequestMethod: String {
     case post
 }
 
-struct Resource<A> {
+struct Resource<A: Sendable>: Sendable {
     let path: String
     let method: RequestMethod
     let requestBody: Data?
     let queryItems: [URLQueryItem]?
     let headers: [String: String]
-    let parse: (Data) -> A?
+    let parse: @Sendable (Data) -> A?
 }
 
-struct OursResponse {
+struct OursResponse: Sendable {
     let success: Bool
 }
 
-enum Reason {
+enum Reason: Sendable {
     case parseError
     case noData
     case notOKStatusCode(statusCode: Int)
@@ -54,34 +54,34 @@ enum Reason {
 }
 
 public struct ServerProxyResource {
-    public init(queryItems: [URLQueryItem]? = nil, headers: [String : String]) {
+    public init(queryItems: [URLQueryItem]? = nil, headers: [String: String]) {
         self.queryItems = queryItems
         self.headers = headers
     }
-    
+
     public let queryItems: [URLQueryItem]?
     public let headers: [String: String]
 }
 
 class Network {
-    
+
     var serverURL: String
-    
+
     required init(serverURL: String) {
         self.serverURL = serverURL
     }
-    
-    class func apiRequest<A>(base: String,
-                             resource: Resource<A>,
-                             failure: @escaping (Reason, Data?, URLResponse?) -> Void,
-                             success: @escaping (A, URLResponse?) -> Void) {
+
+    class func apiRequest<A: Sendable>(base: String,
+                                       resource: Resource<A>,
+                                       failure: @escaping @Sendable (Reason, Data?, URLResponse?) -> Void,
+                                       success: @escaping @Sendable (A, URLResponse?) -> Void) {
         guard let request = buildURLRequest(base, resource: resource) else {
             return
         }
-        
-        URLSession.shared.dataTask(with: request) { (data, response, error) -> Void in
+
+        URLSession.shared.dataTask(with: request) { (data, response, error) in
             guard let httpResponse = response as? HTTPURLResponse else {
-                
+
                 if let hasError = error {
                     failure(.other(hasError), data, response)
                 } else {
@@ -106,32 +106,32 @@ class Network {
             success(result, response)
         }.resume()
     }
-    
-    private class func buildURLRequest<A>(_ base: String, resource: Resource<A>) -> URLRequest? {
+
+    private class func buildURLRequest<A: Sendable>(_ base: String, resource: Resource<A>) -> URLRequest? {
         guard let url = BasePath.buildURL(base: base,
                                           path: resource.path,
                                           queryItems: resource.queryItems) else {
             return nil
         }
-        
+
         OursPrivacyLogger.debug(message: "Fetching URL")
         OursPrivacyLogger.debug(message: url.absoluteURL)
         var request = URLRequest(url: url)
         request.httpMethod = resource.method.rawValue
         request.httpBody = resource.requestBody
-        
+
         for (k, v) in resource.headers {
             request.setValue(v, forHTTPHeaderField: k)
         }
         return request as URLRequest
     }
-    
-    class func buildResource<A>(path: String,
-                                method: RequestMethod,
-                                requestBody: Data? = nil,
-                                queryItems: [URLQueryItem]? = nil,
-                                headers: [String: String],
-                                parse: @escaping (Data) -> A?) -> Resource<A> {
+
+    class func buildResource<A: Sendable>(path: String,
+                                          method: RequestMethod,
+                                          requestBody: Data? = nil,
+                                          queryItems: [URLQueryItem]? = nil,
+                                          headers: [String: String],
+                                          parse: @escaping @Sendable (Data) -> A?) -> Resource<A> {
         return Resource(path: path,
                         method: method,
                         requestBody: requestBody,
@@ -140,4 +140,3 @@ class Network {
                         parse: parse)
     }
 }
-

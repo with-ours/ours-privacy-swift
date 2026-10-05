@@ -28,6 +28,50 @@ public typealias Properties = [String: OursPrivacyType]
 typealias InternalProperties = [String: Any]
 typealias Queue = [InternalProperties]
 
+private struct PropertySnapshot: Sendable {
+    let data: Data?
+
+    init(_ properties: Properties?) {
+        assertPropertyTypes(properties)
+        data = properties.flatMap { JSONHandler.serializeJSONObject($0) }
+    }
+
+    func decode() -> Properties? {
+        guard let data, let raw = JSONHandler.deserializeData(data) as? [String: Any] else { return nil }
+        var properties: Properties = [:]
+        for (key, value) in raw {
+            guard let property = Self.decodeValue(value) else { return nil }
+            properties[key] = property
+        }
+        return properties
+    }
+
+    private static func decodeValue(_ value: Any) -> OursPrivacyType? {
+        if let dictionary = value as? [String: Any] {
+            var decoded: Properties = [:]
+            for (key, nested) in dictionary {
+                guard let property = decodeValue(nested) else { return nil }
+                decoded[key] = property
+            }
+            return decoded
+        }
+        if let array = value as? [Any] {
+            var decoded: [OursPrivacyType] = []
+            for nested in array {
+                guard let property = decodeValue(nested) else { return nil }
+                decoded.append(property)
+            }
+            return decoded
+        }
+        return value as? OursPrivacyType
+    }
+}
+
+// Persisted events are freshly decoded values that the SDK alone owns.
+private struct PersistedEventTransfer: @unchecked Sendable {
+    let value: Queue
+}
+
 protocol AppLifecycle {
     func applicationDidBecomeActive()
     func applicationWillResignActive()
@@ -48,6 +92,8 @@ public struct ProxyServerConfig {
 /// hold the reference for the lifetime of the app. The public surface is
 /// aligned across the Ours Privacy SDKs so cross-platform integrations
 /// share a vocabulary.
+/// Queued event state and identity snapshots use queues and locks.
+/// Configure mutable public options before concurrent tracking.
 ///
 /// ```swift
 /// let op = OursPrivacy(token: "TOKEN", trackAutomaticEvents: true)
@@ -56,7 +102,7 @@ public struct ProxyServerConfig {
 ///                                       externalId: "user-123"))
 /// op.track(event: "Sign Up")
 /// ```
-open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate {
+open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate, @unchecked Sendable {
 
     /// The project token. Set at construction.
     open var apiToken = ""
@@ -67,11 +113,27 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate 
     /// Stable per-install identifier sent as `visitor_id` on every event.
     /// Generated lazily on first launch and persisted in NSUserDefaults
     /// under the OursPrivacy suite. Reset by ``reset(completion:)``.
-    open internal(set) var visitorId: String = ""
+    open internal(set) var visitorId: String {
+        get {
+            var value = ""
+            readWriteLock.read { value = _visitorId }
+            return value
+        }
+        set { readWriteLock.write { _visitorId = newValue } }
+    }
+    private var _visitorId = ""
 
     /// True only when the host explicitly called ``setVisitorId(_:)``.
     /// Forwarded as the top-level `is_manually_set_id` envelope field.
-    open internal(set) var isManuallySetId: Bool = false
+    open internal(set) var isManuallySetId: Bool {
+        get {
+            var value = false
+            readWriteLock.read { value = _isManuallySetId }
+            return value
+        }
+        set { readWriteLock.write { _isManuallySetId = newValue } }
+    }
+    private var _isManuallySetId = false
 
     let oursprivacyPersistence: OursPrivacyPersistence
 
@@ -103,7 +165,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate 
     }
 
     /// Optional proxy delegate that supplies per-request headers / query items.
-    open weak var proxyServerDelegate: OursPrivacyProxyServerDelegate? = nil
+    open weak var proxyServerDelegate: OursPrivacyProxyServerDelegate?
 
     open var debugDescription: String {
         return "OursPrivacy(\n"
@@ -227,6 +289,9 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate 
         flushInstance = Flush(serverURL: self.serverURL)
         trackInstance = Track()
         trackInstance.oursprivacyInstance = self
+#if os(iOS) || os(tvOS) || os(visionOS)
+        AutomaticProperties.prepareUIProperties(beforeProcessing: trackingQueue)
+#endif
         flushInstance.delegate = self
         if startFlushTimer {
             flushInstance.flushInterval = flushInterval
@@ -328,11 +393,13 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate 
         if hasOptedOutTracking() {
             return
         }
-        let completionHandler: () -> Void = { [weak self] in
-            guard let self = self else { return }
-            if self.taskId != UIBackgroundTaskIdentifier.invalid {
-                sharedApplication.endBackgroundTask(self.taskId)
-                self.taskId = UIBackgroundTaskIdentifier.invalid
+        let completionHandler: @Sendable () -> Void = { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self, let application = OursPrivacy.sharedUIApplication() else { return }
+                if self.taskId != UIBackgroundTaskIdentifier.invalid {
+                    application.endBackgroundTask(self.taskId)
+                    self.taskId = UIBackgroundTaskIdentifier.invalid
+                }
             }
         }
         taskId = sharedApplication.beginBackgroundTask(expirationHandler: completionHandler)
@@ -363,7 +430,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate 
         var consentSnapshot: InternalProperties = [:]
         var attributionSnapshot: InternalProperties = [:]
         readWriteLock.read {
-            visitorIdSnapshot = visitorId
+            visitorIdSnapshot = _visitorId
             defaultEventSnapshot = defaultEventProperties
             customSnapshot = userCustomProperties
             consentSnapshot = userConsentProperties
@@ -379,7 +446,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate 
     func archive() {
         readWriteLock.read {
             OursPrivacyPersistence.saveIdentity(
-                OursPrivacyIdentity(visitorId: visitorId, isManuallySetId: isManuallySetId),
+                OursPrivacyIdentity(visitorId: _visitorId, isManuallySetId: _isManuallySetId),
                 instanceName: self.name)
         }
     }
@@ -388,15 +455,15 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate 
         readWriteLock.write {
             optOutStatus = OursPrivacyPersistence.loadOptOutStatusFlag(instanceName: self.name)
             let identity = OursPrivacyPersistence.loadIdentity(instanceName: self.name)
-            visitorId = identity.visitorId
-            isManuallySetId = identity.isManuallySetId
-            if visitorId.isEmpty {
-                visitorId = newVisitorId()
+            _visitorId = identity.visitorId
+            _isManuallySetId = identity.isManuallySetId
+            if _visitorId.isEmpty {
+                _visitorId = newVisitorId()
             }
         }
         readWriteLock.read {
             OursPrivacyPersistence.saveIdentity(
-                OursPrivacyIdentity(visitorId: visitorId, isManuallySetId: isManuallySetId),
+                OursPrivacyIdentity(visitorId: _visitorId, isManuallySetId: _isManuallySetId),
                 instanceName: self.name)
         }
     }
@@ -450,8 +517,7 @@ extension OursPrivacy {
     /// Returns the current visitor ID, or `nil` if the SDK hasn't generated
     /// one yet (the typical case is before the first `identify` / `track`).
     public func getVisitorId() -> String? {
-        var current = ""
-        readWriteLock.read { current = visitorId }
+        let current = visitorId
         return current.isEmpty ? nil : current
     }
 
@@ -465,8 +531,8 @@ extension OursPrivacy {
             return
         }
         readWriteLock.write {
-            self.visitorId = visitorId
-            self.isManuallySetId = true
+            self._visitorId = visitorId
+            self._isManuallySetId = true
         }
         archive()
     }
@@ -476,18 +542,24 @@ extension OursPrivacy {
     /// to an external system, set ``OursPrivacyUserProperties/externalId``
     /// on the struct — it serializes as `external_id` on the wire.
     public func identify(_ userProperties: OursPrivacyUserProperties? = nil,
-                         completion: (() -> Void)? = nil) {
+                         completion: (@Sendable () -> Void)? = nil) {
         if hasOptedOutTracking() {
             if let completion = completion {
                 DispatchQueue.main.async(execute: completion)
             }
             return
         }
-        let wireProps = userProperties?.toWireProperties()
-        trackingQueue.async { [weak self, wireProps, completion] in
+#if os(iOS) || os(tvOS) || os(visionOS)
+        AutomaticProperties.primeUIPropertiesIfOnMain()
+#endif
+        enqueueIdentify(PropertySnapshot(userProperties?.toWireProperties()), completion: completion)
+    }
+
+    private func enqueueIdentify(_ snapshot: PropertySnapshot, completion: (@Sendable () -> Void)?) {
+        trackingQueue.async { [weak self, snapshot, completion] in
             guard let self = self else { return }
             let context = self.currentEventContext()
-            let item = self.trackInstance.composeIdentifyEvent(userProperties: wireProps,
+            let item = self.trackInstance.composeIdentifyEvent(userProperties: snapshot.decode(),
                                                                context: context)
             self.oursprivacyPersistence.saveEntity(item, type: .events)
             if let completion = completion {
@@ -502,14 +574,14 @@ extension OursPrivacy {
 
     /// Clears the visitor identity, the typed user bags, and the local
     /// event queue. The next event gets a fresh `visitor_id`.
-    public func reset(completion: (() -> Void)? = nil) {
+    public func reset(completion: (@Sendable () -> Void)? = nil) {
         flush()
         trackingQueue.async { [weak self] in
             guard let self = self else { return }
             OursPrivacyPersistence.deleteUserDefaultsData(instanceName: self.name)
             self.readWriteLock.write {
-                self.visitorId = self.newVisitorId()
-                self.isManuallySetId = false
+                self._visitorId = self.newVisitorId()
+                self._isManuallySetId = false
                 self.defaultEventProperties = [:]
                 self.userCustomProperties = [:]
                 self.userConsentProperties = [:]
@@ -611,7 +683,7 @@ extension OursPrivacy {
 
     /// Drains the local event queue to `/ingest`. The flush timer and the
     /// background hook also call this; the host rarely needs to.
-    public func flush(performFullFlush: Bool = false, completion: (() -> Void)? = nil) {
+    public func flush(performFullFlush: Bool = false, completion: (@Sendable () -> Void)? = nil) {
         if hasOptedOutTracking() {
             if let completion = completion {
                 DispatchQueue.main.async(execute: completion)
@@ -636,14 +708,15 @@ extension OursPrivacy {
                 batchSize: performFullFlush ? Int.max : self.flushBatchSize,
                 excludeAutomaticEvents: !self.trackAutomaticEventsEnabled
             )
-            self.networkQueue.async { [weak self, completion] in
+            let pendingEvents = PersistedEventTransfer(value: eventQueue)
+            self.networkQueue.async { [weak self, completion, pendingEvents] in
                 guard let self = self else {
                     if let completion = completion {
                         DispatchQueue.main.async(execute: completion)
                     }
                     return
                 }
-                self.flushQueue(eventQueue, type: .events)
+                self.flushQueue(pendingEvents.value, type: .events)
                 if let completion = completion {
                     DispatchQueue.main.async(execute: completion)
                 }
@@ -671,7 +744,7 @@ extension OursPrivacy {
     func flushEnvelopeContext() -> (token: String, isManuallySetId: Bool) {
         var manualSnapshot = false
         readWriteLock.read {
-            manualSnapshot = self.isManuallySetId
+            manualSnapshot = self._isManuallySetId
         }
         return (apiToken, manualSnapshot)
     }
@@ -699,15 +772,20 @@ extension OursPrivacy {
                       properties: Properties? = nil,
                       userProperties: Properties? = nil) {
         OursPrivacyLogger.debug(message: "Tracking \(event ?? "nil")")
-        trackingQueue.async { [weak self, event, properties, userProperties] in
+#if os(iOS) || os(tvOS) || os(visionOS)
+        AutomaticProperties.primeUIPropertiesIfOnMain()
+#endif
+        let capturedProperties = PropertySnapshot(properties)
+        let capturedUserProperties = PropertySnapshot(userProperties)
+        trackingQueue.async { [weak self, event, capturedProperties, capturedUserProperties] in
             guard let self = self else { return }
             if self.hasOptedOutTracking() {
                 return
             }
             let context = self.currentEventContext()
             let item = self.trackInstance.composeTrackEvent(event: event,
-                                                            eventProperties: properties,
-                                                            userProperties: userProperties,
+                                                            eventProperties: capturedProperties.decode(),
+                                                            userProperties: capturedUserProperties.decode(),
                                                             context: context)
             if item.isEmpty { return }
             self.oursprivacyPersistence.saveEntity(item, type: .events)
@@ -728,8 +806,8 @@ extension OursPrivacy {
         trackingQueue.async { [weak self] in
             guard let self = self else { return }
             self.readWriteLock.write {
-                self.visitorId = self.newVisitorId()
-                self.isManuallySetId = false
+                self._visitorId = self.newVisitorId()
+                self._isManuallySetId = false
                 self.defaultEventProperties = [:]
                 self.userCustomProperties = [:]
                 self.userConsentProperties = [:]
@@ -750,7 +828,10 @@ extension OursPrivacy {
     /// `userProperties` is supplied, identify the visitor in the same flow.
     public func optInTracking(userProperties: OursPrivacyUserProperties? = nil,
                               properties: Properties? = nil) {
-        trackingQueue.async { [weak self] in
+        let capturedProperties = PropertySnapshot(properties)
+        let capturedUserProperties = PropertySnapshot(userProperties?.toWireProperties())
+        let shouldIdentify = userProperties != nil
+        trackingQueue.async { [weak self, capturedProperties, capturedUserProperties, shouldIdentify] in
             guard let self = self else { return }
             self.readWriteLock.write {
                 self.optOutStatus = false
@@ -758,10 +839,10 @@ extension OursPrivacy {
             self.readWriteLock.read {
                 OursPrivacyPersistence.saveOptOutStatusFlag(value: self.optOutStatus!, instanceName: self.name)
             }
-            if let userProperties = userProperties {
-                self.identify(userProperties)
+            if shouldIdentify {
+                self.enqueueIdentify(capturedUserProperties, completion: nil)
             }
-            self.track(event: "$opt_in", properties: properties)
+            self.track(event: "$opt_in", properties: capturedProperties.decode())
         }
     }
 

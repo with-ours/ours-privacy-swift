@@ -8,7 +8,8 @@
 import Foundation
 
 /// Property keys must be String objects and the supported value types need to conform to OursPrivacyType.
-/// OursPrivacyType can be either String, Int, UInt, Double, Float, Bool, [OursPrivacyType], [String: OursPrivacyType], Date, URL, or NSNull.
+/// OursPrivacyType can be String, Int, UInt, Double, Float, Bool, Date, URL, NSNull,
+/// an array of supported values, or a dictionary of supported values.
 /// Numbers are not NaN or infinity
 public protocol OursPrivacyType: Any {
     func isValidNestedTypeAndValue() -> Bool

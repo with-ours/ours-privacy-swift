@@ -30,14 +30,14 @@ Task {
     op.track(event: "Probe Event", properties: [
         "value": 42,
         "platform": "swift",
-        "is_probe": true,
+        "is_probe": true
     ])
 
     op.track(event: "Probe Event With Many Props", properties: [
         "string_prop": "hello",
         "int_prop": 7,
         "double_prop": 3.14,
-        "bool_prop": false,
+        "bool_prop": false
     ])
 
     op.track(event: "Probe Event With User Props",

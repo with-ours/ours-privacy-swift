@@ -18,6 +18,18 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 class Recorder(BaseHTTPRequestHandler):
     out_dir = "captures"
     seq = 0
+    captures = []
+
+    def do_GET(self):
+        if self.path != "/captures":
+            self.send_error(404)
+            return
+        body = json.dumps(Recorder.captures).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -29,6 +41,7 @@ class Recorder(BaseHTTPRequestHandler):
         try:
             body = json.loads(raw)
             pretty = json.dumps(body, indent=2, sort_keys=True)
+            Recorder.captures.append(body)
         except json.JSONDecodeError:
             pretty = raw.decode("utf-8", errors="replace")
         with open(path, "w") as f:
@@ -50,11 +63,14 @@ def main():
     args = p.parse_args()
     Recorder.out_dir = args.out
     os.makedirs(args.out, exist_ok=True)
+    server = HTTPServer(("127.0.0.1", args.port), Recorder)
     print(f"[recorder] listening on http://localhost:{args.port} -> {args.out}/", flush=True)
     try:
-        HTTPServer(("127.0.0.1", args.port), Recorder).serve_forever()
+        server.serve_forever()
     except KeyboardInterrupt:
         sys.exit(0)
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":
