@@ -293,15 +293,17 @@ final class MobileSession {
             let wasAutomatic = handledAutomaticForeground
             let facts = isForeground ? engagement(at: point, force: true) : []
             clearSession()
-            _ = ensureSession(at: point, visitorId: visitorId,
-                              appVersion: appVersion, appBuild: appBuild)
-            state.lastActiveAtMs = point.epochMs
-            isForeground = wasForeground
-            handledAutomaticForeground = wasAutomatic
-            checkpointMonotonicMs = wasForeground ? point.monotonicMs : nil
-            activeVisitorId = wasForeground ? visitorId : nil
-            activeAppVersion = wasForeground ? appVersion : nil
-            activeAppBuild = wasForeground ? appBuild : nil
+            if wasForeground {
+                _ = ensureSession(at: point, visitorId: visitorId,
+                                  appVersion: appVersion, appBuild: appBuild)
+                state.lastActiveAtMs = point.epochMs
+                isForeground = true
+                handledAutomaticForeground = wasAutomatic
+                checkpointMonotonicMs = point.monotonicMs
+                activeVisitorId = visitorId
+                activeAppVersion = appVersion
+                activeAppBuild = appBuild
+            }
             persist()
             return facts
         }

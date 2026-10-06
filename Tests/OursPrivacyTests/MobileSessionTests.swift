@@ -41,6 +41,31 @@ final class MobileSessionTests: XCTestCase {
         XCTAssertTrue(session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(0)).isEmpty)
     }
 
+    func testBackgroundIdentityRotationStartsNextSessionAtNextActivityAcrossMidnight() {
+        let session = makeSession()
+        let late = point(13 * 60 * 60 * 1_000 + 59 * 60 * 1_000)
+        let first = session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: late)
+        let firstSid = first[0].sid
+        session.acknowledgeQueuedFacts(Set(first.map(\.distinctId)), firstOpenQueueEvidence: true)
+        let inactive = point(14 * 60 * 60 * 1_000)
+        _ = session.background(at: inactive)
+        session.acknowledgeQueuedFacts(Set(session.pendingFacts.map(\.distinctId)),
+                                       firstOpenQueueEvidence: true)
+        let identityChange = point(14 * 60 * 60 * 1_000 + 60_000)
+        _ = session.rotate(to: "visitor-b", appVersion: "3.0", appBuild: "2", at: identityChange)
+        XCTAssertTrue(session.pendingFacts.isEmpty)
+
+        let nextActivity = point(14 * 60 * 60 * 1_000 + 5 * 60_000)
+        let reopened = session.foreground(automaticEnabled: true, visitorId: "visitor-b",
+                                          appVersion: "3.0", appBuild: "2", at: nextActivity)
+        let open = reopened.first { $0.name == "$mobile_app_open" }
+        XCTAssertNotNil(open)
+        XCTAssertNotEqual(open?.sid, firstSid)
+        XCTAssertEqual(open?.startedAtMs, nextActivity.epochMs)
+        XCTAssertEqual(open?.occurredAtMs, nextActivity.epochMs)
+        XCTAssertFalse(reopened.contains { $0.name == "$mobile_first_open" })
+    }
+
     func testInactivityBeforeAndAtThirtyMinutesRetainsThenRotatesSession() {
         let session = makeSession()
         let initial = session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(0))

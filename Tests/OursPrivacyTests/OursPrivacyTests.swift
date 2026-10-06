@@ -1,6 +1,46 @@
 import XCTest
 @testable import OursPrivacyKit
 
+private final class RecordingFlushRequest: FlushRequest, @unchecked Sendable {
+    private let lock = NSLock()
+    private var bodies: [String] = []
+
+    override func sendRequest(_ requestData: String, type: FlushType,
+                              headers: [String: String], queryItems: [URLQueryItem] = []) -> Bool {
+        lock.lock()
+        bodies.append(requestData)
+        lock.unlock()
+        return true
+    }
+
+    var sentBodies: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return bodies
+    }
+}
+
+private final class LockedMobileClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var epochMs: Int64
+
+    init(_ epochMs: Int64) {
+        self.epochMs = epochMs
+    }
+
+    func now() -> Int64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return epochMs
+    }
+
+    func set(_ value: Int64) {
+        lock.lock()
+        epochMs = value
+        lock.unlock()
+    }
+}
+
 final class OursPrivacyTests: XCTestCase {
 
     // MARK: - Endpoint / route invariants
@@ -781,6 +821,28 @@ final class OursPrivacyTests: XCTestCase {
                                "$mobile_session_start", "appointment_booked"])
     }
 
+    func testFailedFirstOpenWriteRetriesWithoutAnotherEvent() async {
+        let op = makeMobileInstance()
+        await op.initialize()
+        op.mobilePendingRetryIntervalMs = 25
+        let persist = op.oursprivacyPersistence.persistenceWrite
+        op.oursprivacyPersistence.persistenceWrite = { _ in false }
+        op.mobileForeground(at: mobilePoint())
+        op.trackingQueue.sync {}
+        XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+        XCTAssertFalse(op.mobileSession?.hasAcceptedFirstOpen ?? true)
+
+        op.oursprivacyPersistence.persistenceWrite = persist
+        for _ in 0 ..< 50 {
+            if op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).count == 3 { break }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        let queued = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(queued.compactMap { $0["event"] as? String },
+                       ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start"])
+        XCTAssertTrue(op.mobileSession?.hasAcceptedFirstOpen ?? false)
+    }
+
     func testQueueEvidenceSurvivesMissingSessionAcknowledgmentAndRestart() async {
         let name = "mobile-\(UUID().uuidString)"
         let session = MobileSession(instanceName: name)
@@ -855,6 +917,38 @@ final class OursPrivacyTests: XCTestCase {
         XCTAssertEqual(accepted.first?["visitor_id"] as? String, "visitor-a")
     }
 
+    func testFutureFirstOpenBlocksNewLifecycleUntilScheduledRetryAfterRollback() async {
+        let name = "mobile-\(UUID().uuidString)"
+        let op = makeMobileInstance(name: name)
+        let now = Int64(Date().timeIntervalSince1970 * 1_000)
+        let clock = LockedMobileClock(now)
+        op.mobileQueueNowMs = { clock.now() }
+        op.mobilePendingRetryIntervalMs = 25
+        let future = MobileTimePoint(epochMs: now + 10 * 60_000, monotonicMs: 0)
+        let first = op.mobileSession?.foreground(automaticEnabled: true, visitorId: "original",
+                                                 at: future).first
+        XCTAssertEqual(first?.name, "$mobile_first_open")
+        _ = op.mobileSession?.background(at: MobileTimePoint(epochMs: future.epochMs + 1_000,
+                                                              monotonicMs: 1_000))
+        await op.initialize()
+        op.mobileForeground(at: MobileTimePoint(epochMs: now, monotonicMs: 2_000))
+        op.trackingQueue.sync {}
+        XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+        XCTAssertFalse(op.mobileSession?.hasAcceptedFirstOpen ?? true)
+
+        clock.set(future.epochMs + 1_000)
+        for _ in 0 ..< 50 {
+            if !op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty { break }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        let queued = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(queued.first?["event"] as? String, "$mobile_first_open")
+        XCTAssertEqual(queued.first?["distinct_id"] as? String, first?.distinctId)
+        XCTAssertEqual(queued.first?["visitor_id"] as? String, "original")
+        XCTAssertEqual(queued.filter { $0["event"] as? String == "$mobile_first_open" }.count, 1)
+        XCTAssertTrue(queued.contains { $0["event"] as? String == "$mobile_app_open" })
+    }
+
     func testOptOutClearsCanonicalAndManualQueueBeforeNextTracking() async {
         let op = makeMobileInstance()
         await op.initialize()
@@ -919,6 +1013,114 @@ final class OursPrivacyTests: XCTestCase {
         XCTAssertEqual(booked?["visitor_id"] as? String, "new-visitor")
         XCTAssertNotEqual((booked?["defaultProperties"] as? [String: Any])?["sid"] as? String,
                           pending?.sid)
+    }
+
+    func testFailedOptOutClearCannotSendOldEventsAfterOptIn() async {
+        let op = makeMobileInstance()
+        await op.initialize()
+        op.mobileForeground(at: mobilePoint())
+        op.track(event: "before-opt-out", properties: ["private": "old"])
+        op.trackingQueue.sync {}
+        let old = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertTrue(op.oursprivacyPersistence.hasFirstOpenQueueEvidence)
+        let request = RecordingFlushRequest(serverURL: op.serverURL)
+        op.flushInstance.flushRequest = request
+
+        let persist = op.oursprivacyPersistence.persistenceWrite
+        op.oursprivacyPersistence.persistenceWrite = { _ in false }
+        op.optOutTracking()
+        op.trackingQueue.sync {}
+        XCTAssertFalse(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+        op.optInTracking()
+        op.trackingQueue.sync {}
+        XCTAssertTrue(op.hasOptedOutTracking())
+        op.flushQueue(old, type: .events)
+        XCTAssertTrue(request.sentBodies.isEmpty)
+
+        op.oursprivacyPersistence.persistenceWrite = persist
+        op.optInTracking()
+        op.trackingQueue.sync {}
+        XCTAssertFalse(op.hasOptedOutTracking())
+        XCTAssertTrue(op.oursprivacyPersistence.hasFirstOpenQueueEvidence)
+        let after = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertFalse(after.contains { $0["event"] as? String == "before-opt-out" })
+        XCTAssertFalse(after.contains { $0["event"] as? String == "$mobile_first_open" })
+        op.flushQueue(old, type: .events)
+        op.flushQueue(after, type: .events)
+        XCTAssertFalse(request.sentBodies.joined().contains("before-opt-out"))
+        XCTAssertFalse(request.sentBodies.joined().contains("\"private\":\"old\""))
+    }
+
+    func testFailedResetClearBlocksSendsUntilStorageRecovers() {
+        let op = makeInstance()
+        op.track(event: "before-reset", properties: ["private": "old"])
+        op.trackingQueue.sync {}
+        let old = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let request = RecordingFlushRequest(serverURL: op.serverURL)
+        op.flushInstance.flushRequest = request
+        let persist = op.oursprivacyPersistence.persistenceWrite
+        op.oursprivacyPersistence.persistenceWrite = { _ in false }
+
+        op.reset()
+        op.trackingQueue.sync {}
+        op.networkQueue.sync {}
+        op.flushQueue(old, type: .events)
+        XCTAssertTrue(request.sentBodies.isEmpty)
+        XCTAssertEqual(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).count, 1)
+
+        op.oursprivacyPersistence.persistenceWrite = persist
+        op.track(event: "after-reset")
+        op.trackingQueue.sync {}
+        let after = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(after.compactMap { $0["event"] as? String }, ["after-reset"])
+        op.flushQueue(old, type: .events)
+        op.flushQueue(after, type: .events)
+        XCTAssertFalse(request.sentBodies.joined().contains("before-reset"))
+    }
+
+    func testFailedPrivacyClearRecoversOnRestartAndPreservesFirstOpenEvidence() {
+        let name = "privacy-recovery-\(UUID().uuidString)"
+        let original = OursPrivacyPersistence(instanceName: name)
+        XCTAssertTrue(original.saveEntity(makeEntity("$mobile_first_open"), type: .events,
+                                          firstOpen: true))
+        original.persistenceWrite = { _ in false }
+        XCTAssertFalse(original.clearEntitiesForPrivacy())
+        XCTAssertTrue(original.hasPendingPrivacyClear)
+
+        let restarted = OursPrivacyPersistence(instanceName: name)
+        XCTAssertFalse(restarted.hasPendingPrivacyClear)
+        XCTAssertTrue(restarted.hasFirstOpenQueueEvidence)
+        XCTAssertTrue(restarted.loadEntitiesInBatch(type: .events).isEmpty)
+        OursPrivacyPersistence.deleteUserDefaultsData(instanceName: name)
+    }
+
+    func testBackgroundResetStartsManualSessionAtNextActivityAcrossMidnight() async {
+        let op = makeMobileInstance()
+        await op.initialize()
+        let midnight: Int64 = 1_791_244_800_000
+        let foreground = MobileTimePoint(epochMs: midnight - 60_000, monotonicMs: 0)
+        op.mobileQueueNowMs = { midnight + 5 * 60_000 }
+        op.mobileForeground(at: foreground)
+        op.mobileBackground(at: MobileTimePoint(epochMs: midnight - 1_000, monotonicMs: 59_000))
+        op.trackingQueue.sync {}
+        op.captureMobileTime = {
+            MobileTimePoint(epochMs: midnight + 60_000, monotonicMs: 120_000)
+        }
+        op.reset()
+        op.trackingQueue.sync {}
+
+        let nextActivity = midnight + 5 * 60_000
+        op.captureMobileTime = {
+            MobileTimePoint(epochMs: nextActivity, monotonicMs: 360_000)
+        }
+        op.track(event: "appointment_booked")
+        op.trackingQueue.sync {}
+        let booking = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            .first { $0["event"] as? String == "appointment_booked" }
+        let defaults = booking?["defaultProperties"] as? [String: Any]
+        XCTAssertNotNil(defaults?["sid"] as? String)
+        XCTAssertEqual(defaults?["mobile_session_started_at"] as? String,
+                       defaults?["mobile_occurred_at"] as? String)
     }
 
     func testWipeLegacySQLiteFileIfPresent() {

@@ -27,6 +27,7 @@ struct OursPrivacyUserDefaultsKeys {
     static let visitorId = "OPVisitorId"
     static let isManuallySetId = "OPIsManuallySetId"
     static let eventQueue = "OPEventQueue"
+    static let privacyClearPending = "OPPrivacyClearPending"
 
     // Legacy keys (pre-canonical) — read once on first canonical launch so
     // they can be cleaned up, then never written again.
@@ -56,18 +57,26 @@ class OursPrivacyPersistence {
     private var inMemoryQueue: [InternalProperties] = []
     private var nextId: Int32 = 1
     private var firstOpenQueueEvidence = false
+    private var privacyClearPending: Bool
+    private let defaults: UserDefaults?
     var persistenceWrite: (Data) -> Bool
 
     init(instanceName: String) {
         self.instanceName = instanceName
         let defaults = UserDefaults(suiteName: OursPrivacyUserDefaultsKeys.suiteName)
-        let key = "\(OursPrivacyUserDefaultsKeys.prefix)-\(instanceName)-\(OursPrivacyUserDefaultsKeys.eventQueue)"
+        self.defaults = defaults
+        let prefix = "\(OursPrivacyUserDefaultsKeys.prefix)-\(instanceName)-"
+        privacyClearPending = defaults?.bool(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.privacyClearPending)") ?? false
+        let key = "\(prefix)\(OursPrivacyUserDefaultsKeys.eventQueue)"
         persistenceWrite = { data in
             guard let defaults else { return false }
             defaults.set(data, forKey: key)
             return defaults.synchronize() && defaults.data(forKey: key) == data
         }
         loadQueueFromDefaults()
+        if privacyClearPending {
+            _ = clearEntitiesForPrivacy()
+        }
     }
 
     deinit {}
@@ -141,6 +150,29 @@ class OursPrivacyPersistence {
         }
     }
 
+    @discardableResult
+    func clearEntitiesForPrivacy() -> Bool {
+        var cleared = false
+        queueLock.write {
+            privacyClearPending = true
+            guard persistPrivacyClearPending(true) else { return }
+            guard persistQueueToDefaults([], firstOpenAccepted: firstOpenQueueEvidence) else { return }
+            inMemoryQueue.removeAll()
+            nextId = 1
+            if persistPrivacyClearPending(false) {
+                privacyClearPending = false
+                cleared = true
+            }
+        }
+        return cleared
+    }
+
+    var hasPendingPrivacyClear: Bool {
+        var pending = false
+        queueLock.read { pending = privacyClearPending }
+        return pending
+    }
+
     var hasFirstOpenQueueEvidence: Bool {
         var result = false
         queueLock.read { result = firstOpenQueueEvidence }
@@ -152,6 +184,16 @@ class OursPrivacyPersistence {
     private func queueKey() -> String {
         let prefix = "\(OursPrivacyUserDefaultsKeys.prefix)-\(instanceName)-"
         return "\(prefix)\(OursPrivacyUserDefaultsKeys.eventQueue)"
+    }
+
+    private func privacyClearKey() -> String {
+        "\(OursPrivacyUserDefaultsKeys.prefix)-\(instanceName)-\(OursPrivacyUserDefaultsKeys.privacyClearPending)"
+    }
+
+    private func persistPrivacyClearPending(_ required: Bool) -> Bool {
+        guard let defaults else { return false }
+        defaults.set(required, forKey: privacyClearKey())
+        return defaults.synchronize() && defaults.bool(forKey: privacyClearKey()) == required
     }
 
     private func loadQueueFromDefaults() {
@@ -294,6 +336,7 @@ class OursPrivacyPersistence {
         defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.optOutStatus)")
         if !preserveEventQueue {
             defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.eventQueue)")
+            defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.privacyClearPending)")
         }
         defaults.synchronize()
     }

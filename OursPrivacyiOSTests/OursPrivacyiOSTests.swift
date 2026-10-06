@@ -10,6 +10,28 @@ import Foundation
 import Testing
 @testable import OursPrivacyKit
 
+private final class LockedTestMobileTime: @unchecked Sendable {
+    private let lock = NSLock()
+    private var point: MobileTimePoint
+
+    init(_ point: MobileTimePoint) {
+        self.point = point
+    }
+
+    func capture() -> MobileTimePoint {
+        lock.lock()
+        defer { lock.unlock() }
+        return point
+    }
+
+    func advance(by milliseconds: Int64) {
+        lock.lock()
+        point = MobileTimePoint(epochMs: point.epochMs + milliseconds,
+                                monotonicMs: point.monotonicMs + milliseconds)
+        lock.unlock()
+    }
+}
+
 struct OursPrivacyiOSTests {
 
     @Test func maxBatchSizeIsClampedAt50() async throws {
@@ -76,6 +98,36 @@ struct OursPrivacyiOSTests {
         #expect((mobile.first?["eventProperties"] as? [String: Any])?["caller_field"] == nil)
         #expect(bookedDefaults?["utm_source"] as? String == "campaign")
         #expect((booked?["eventProperties"] as? [String: Any])?["caller_field"] as? String == "private")
+    }
+
+    @Test @MainActor func foregroundTimerEmitsRepeatedEngagementWithoutBackground() async {
+        let op = OursPrivacy(token: "ios-checkpoint-\(UUID().uuidString)", trackAutomaticEvents: true)
+        let clock = LockedTestMobileTime(MobileTimePoint.capture())
+        op.captureMobileTime = { clock.capture() }
+        op.mobileQueueNowMs = { clock.capture().epochMs }
+        op.mobileCheckpointIntervalMs = 20
+        await op.initialize()
+        op.mobileForeground(at: clock.capture())
+        op.trackingQueue.sync {}
+        clock.advance(by: 10_000)
+        for _ in 0 ..< 50 {
+            let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            if events.contains(where: { $0["event"] as? String == "$mobile_session_engagement" }) { break }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        clock.advance(by: 11_000)
+        for _ in 0 ..< 50 {
+            let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            if events.filter({ $0["event"] as? String == "$mobile_session_engagement" }).count >= 2 { break }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let durations = events.filter { $0["event"] as? String == "$mobile_session_engagement" }
+            .compactMap { ($0["eventProperties"] as? [String: Any])?["engagement_duration_ms"] as? Int64 }
+        #expect(durations == [10_000, 11_000])
+        #expect(events.filter { $0["event"] as? String == "$mobile_app_open" }.count == 1)
+        op.optOutTracking()
+        op.trackingQueue.sync {}
     }
 
     @Test @MainActor func backgroundInitializationPreservesFirstEventMetadataAndOrder() async {
