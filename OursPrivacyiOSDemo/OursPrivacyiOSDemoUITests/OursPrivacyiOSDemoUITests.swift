@@ -5,6 +5,13 @@ final class OursPrivacyiOSDemoUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testUTCMillisecondTimestampParserRejectsInvalidDates() {
+        XCTAssertNotNil(parseUTCMillisecondTimestamp("2026-10-05T10:00:00.000Z"))
+        XCTAssertNil(parseUTCMillisecondTimestamp("2026-13-05T10:00:00.000Z"))
+        XCTAssertNil(parseUTCMillisecondTimestamp("2026-10-05T10:00:00.000+00:00"))
+        XCTAssertNil(parseUTCMillisecondTimestamp("2026-10-05T10:00:00Z"))
+    }
+
     @MainActor
     func testDemoActionsSendCanonicalPayloads() throws {
         let recorderURL = ProcessInfo.processInfo.environment["RECORDER_URL"] ?? "http://127.0.0.1:8765"
@@ -169,11 +176,22 @@ final class OursPrivacyiOSDemoUITests: XCTestCase {
             XCTAssertEqual(defaults["app_build"] as? String, "1")
             let startedAt = try XCTUnwrap(defaults["mobile_session_started_at"] as? String)
             let occurredAt = try XCTUnwrap(defaults["mobile_occurred_at"] as? String)
-            XCTAssertTrue(isUTCMillisecondTimestamp(startedAt), startedAt)
-            XCTAssertTrue(isUTCMillisecondTimestamp(occurredAt), occurredAt)
+            let startedDate = try XCTUnwrap(parseUTCMillisecondTimestamp(startedAt), startedAt)
+            let occurredDate = try XCTUnwrap(parseUTCMillisecondTimestamp(occurredAt), occurredAt)
+            XCTAssertGreaterThanOrEqual(occurredDate, startedDate)
             XCTAssertEqual(startedAt, (sessionStart["defaultProperties"] as? [String: Any])?["mobile_session_started_at"] as? String)
             XCTAssertNil(event["time"])
         }
+        func occurrence(_ event: [String: Any]) throws -> Date {
+            let defaults = try XCTUnwrap(event["defaultProperties"] as? [String: Any])
+            let timestamp = try XCTUnwrap(defaults["mobile_occurred_at"] as? String)
+            return try XCTUnwrap(parseUTCMillisecondTimestamp(timestamp), timestamp)
+        }
+        XCTAssertLessThanOrEqual(try occurrence(firstOpen), try occurrence(sessionStart))
+        XCTAssertLessThanOrEqual(try occurrence(sessionStart), try occurrence(screen))
+        XCTAssertLessThanOrEqual(try occurrence(screen), try occurrence(booking))
+        XCTAssertLessThanOrEqual(try occurrence(screen), try occurrence(engagement))
+        XCTAssertLessThanOrEqual(try occurrence(engagement), try occurrence(warmOpen.element))
         let automaticJSON = try XCTUnwrap(String(data: JSONSerialization.data(withJSONObject: automatic),
                                                  encoding: .utf8)).lowercased()
         for forbidden in [initialURL.lowercased(), "private-demo-value", "private-ad-value",
@@ -226,9 +244,14 @@ final class OursPrivacyiOSDemoUITests: XCTestCase {
         return [:]
     }
 
-    private func isUTCMillisecondTimestamp(_ value: String) -> Bool {
-        value.range(of: #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$"#,
-                    options: .regularExpression) != nil
+    private func parseUTCMillisecondTimestamp(_ value: String) -> Date? {
+        guard value.range(of: #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$"#,
+                          options: .regularExpression) != nil else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        guard let date = formatter.date(from: value), formatter.string(from: date) == value else { return nil }
+        return date
     }
 
     private func events(token: String, recorderURL: String) throws -> [[String: Any]] {

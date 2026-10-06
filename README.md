@@ -233,7 +233,21 @@ func didShowRoute(_ route: AppRoute) {
 
 Use fixed developer-chosen labels of 1–80 ASCII characters matching `^[A-Za-z][A-Za-z0-9 _-]{0,79}$`, without leading or trailing whitespace. Empty, URL-like, and non-ASCII strings are ignored. Validation cannot tell a patient name such as `Jane Smith` from a fixed label, so **never** pass patient data, visible titles, route parameters, or raw URLs. Map each route to a fixed label as above. The SDK does not inspect screen content.
 
-`trackScreen` and manual `track()` work with `trackAutomaticEvents: false`; iOS events still carry `defaultProperties.sid`, `mobile_session_started_at`, `mobile_occurred_at`, `mobile_platform: "ios"`, `mobile_contract_version: 1`, and app version/build when available. Automatic lifecycle tracking adds `$mobile_first_open`, `$mobile_app_open`, `$mobile_session_start`, `$mobile_session_engagement`, `$mobile_session_end` when observed, and `$mobile_app_update` on a later app version change. Canonical `$mobile_*` facts contain SDK metadata and stable screen labels, without caller default event or user properties. Full `optOutTracking()` clears queued events and suppresses manual screens, lifecycle facts, and purchases.
+`trackScreen` and manual `track()` work with `trackAutomaticEvents: false`. On iOS, each carries the mobile session metadata below. `trackAutomaticEvents` defaults to `false` and enables automatic lifecycle, engagement, and update facts when set to `true`. `$mobile_*` names are reserved for SDK facts: manual `track(event:)` calls with that prefix are ignored, including unknown names. Legacy `$ae_*` handling is unchanged.
+
+| Canonical event | When emitted on iOS | `eventProperties` |
+| --- | --- | --- |
+| `$mobile_first_open` | First eligible tracked foreground open for this installation and token, once | `null` |
+| `$mobile_app_open` | Each foreground entry, including cold and warm opens | `null` |
+| `$mobile_session_start` | First tracked foreground entry in a new session, once per `sid` | `null` |
+| `$mobile_session_engagement` | A positive measured foreground-time delta at a checkpoint, screen change, or pause/background | Required positive integer `engagement_duration_ms` in milliseconds; `screen_name` when a tracked screen is active |
+| `$mobile_session_end` | Best effort when an expired session is observed on a later foreground entry; it can be absent | `null` |
+| `$mobile_app_update` | A later tracked open after the observed app version or build changes, never the first observed open | `previous_app_version` and `previous_app_build` when previously known |
+| `$mobile_screen_view` | A valid explicit `trackScreen` transition; repeated active labels are suppressed | Required `screen_name`; no `screen_class` is collected by the explicit Swift API |
+
+Every iOS mobile event, including manual `track()` and `trackScreen()`, has SDK-owned `defaultProperties.sid` (a session ID), `mobile_session_started_at`, `mobile_occurred_at`, `mobile_platform: "ios"`, and `mobile_contract_version: 1`, plus `app_version` and `app_build` when the host bundle supplies them. Canonical facts also have `device_vendor` and `version`, plus `device_model`, `device_type`, `os_name`, `os_version`, `screen_width`, and `screen_height` when available. `version` is the SDK version, not the app version. Timestamps are ISO-8601 UTC with exactly three fractional digits and `Z`; `mobile_occurred_at` is captured when the event is queued and is no earlier than its session start. The SDK does not set top-level `time`. Foregrounding at or after 30 minutes of inactivity starts a new `sid`; a warm open under 30 minutes keeps it. Engagement uses nonoverlapping, positive integer millisecond deltas from a monotonic clock; 10 seconds accumulated within a session meets the engaged threshold. Reset, visitor-ID change, and opt-out discard the session; opt-out clears queued events and suppresses manual screens, lifecycle facts, and purchases.
+
+Canonical facts carry only SDK lifecycle metadata and stable screen labels. They have `userProperties: null`, never merge caller default or per-call event/user properties, and collect no patient fields, advertising IDs, or raw URL. Screen labels and manual event properties are developer-controlled, so keep them free of patient data and route parameters. The mobile contract applies to iOS app runtime; on macOS, tvOS, visionOS, watchOS, and iOS apps running on Mac, `trackScreen` emits no canonical fact and ordinary manual events continue without mobile session metadata.
 
 #### StoreKit purchase collection
 

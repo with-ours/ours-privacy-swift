@@ -278,6 +278,42 @@ extension OursPrivacyTests {
         OursPrivacyPersistence.deleteUserDefaultsData(instanceName: token)
     }
 
+    func testIndexedModeSurvivesResetAndOptOutAcrossRestart() {
+        for privacyAction in ["reset", "opt-out"] {
+            let token = "indexed-\(privacyAction)-\(UUID().uuidString)"
+            defer { OursPrivacyPersistence.deleteUserDefaultsData(instanceName: token) }
+            let original = OursPrivacy(token: token, trackAutomaticEvents: false)
+            original.track(event: "first")
+            original.trackingQueue.sync {}
+            original.flushInstance.flushRequest = ScriptedIngestRequest(responses: [
+                ingestResult(#"{"success":true,"visitor_id":"visitor","accepted":1,"rejected":[]}"#)
+            ])
+            original.flushQueue(original.oursprivacyPersistence.loadEntitiesInBatch(type: .events), type: .events)
+            XCTAssertTrue(original.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+
+            if privacyAction == "reset" {
+                original.reset()
+            } else {
+                original.optOutTracking()
+            }
+            original.trackingQueue.sync {}
+
+            let restarted = OursPrivacy(token: token, trackAutomaticEvents: false)
+            if privacyAction == "opt-out" {
+                restarted.optInTracking()
+            }
+            restarted.track(event: "second")
+            restarted.trackingQueue.sync {}
+            let pending = restarted.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            XCTAssertTrue(pending.contains { $0["event"] as? String == "second" })
+            restarted.flushInstance.flushRequest = ScriptedIngestRequest(
+                responses: [ingestResult(#"{"success":true,"visitor_id":"visitor"}"#)])
+            restarted.flushQueue(pending, type: .events)
+            XCTAssertEqual(restarted.oursprivacyPersistence.loadEntitiesInBatch(type: .events).count,
+                           pending.count, privacyAction)
+        }
+    }
+
     func testStaleIndexedResponseCannotRemoveSameNumericIdAndDistinctIdAfterReset() {
         let op = makeTask5Instance()
         let capture = RejectionCapture()
