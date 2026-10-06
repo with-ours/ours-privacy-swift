@@ -841,6 +841,14 @@ final class OursPrivacyTests: XCTestCase {
                        10_000)
     }
 
+    func testWarmForegroundTimerUsesRemainingCumulativeSecond() async {
+        await assertResumedTimerCheckpointsCumulativeEngagement(recreate: false)
+    }
+
+    func testRecreatedWarmForegroundTimerUsesRemainingCumulativeSecond() async {
+        await assertResumedTimerCheckpointsCumulativeEngagement(recreate: true)
+    }
+
     func testManualMobileEventHasSessionWithAutomaticEventsOff() async {
         let op = makeMobileInstance()
         op.trackAutomaticEventsEnabled = false

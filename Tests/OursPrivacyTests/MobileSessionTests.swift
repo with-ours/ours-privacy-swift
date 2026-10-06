@@ -549,3 +549,66 @@ final class MobileSessionTests: XCTestCase {
         XCTAssertEqual(retained.sid, initial.sid)
     }
 }
+
+extension OursPrivacyTests {
+    func assertResumedTimerCheckpointsCumulativeEngagement(recreate: Bool) async {
+        let name = "resumed-checkpoint-\(UUID().uuidString)"
+        let makeInstance = { () -> OursPrivacy in
+            let instance = OursPrivacy(token: name, trackAutomaticEvents: true)
+            instance.mobileSession = MobileSession(instanceName: name)
+            instance.mobileRuntimeEnabled = true
+            instance.flushInstance.delegate = nil
+            instance.flushInstance._flushInterval = 0
+            return instance
+        }
+        let original = makeInstance()
+        await original.initialize()
+        let start = MobileTimePoint(epochMs: Int64(Date().timeIntervalSince1970 * 1_000), monotonicMs: 0)
+        original.mobileQueueNowMs = { start.epochMs + 20_000 }
+        original.mobileForeground(at: start)
+        original.mobileBackground(at: MobileTimePoint(epochMs: start.epochMs + 9_000, monotonicMs: 9_000))
+        original.trackingQueue.sync {}
+        let initialEngagement = original.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            .filter { $0["event"] as? String == "$mobile_session_engagement" }
+        let initialProperties = initialEngagement.first?["eventProperties"] as? [String: Any]
+        XCTAssertEqual(initialProperties?["engagement_duration_ms"] as? Int64, 9_000)
+
+        let resumed: OursPrivacy
+        if recreate {
+            let restored = makeInstance()
+            restored.mobileQueueNowMs = { start.epochMs + 20_000 }
+            await restored.initialize()
+            resumed = restored
+        } else {
+            resumed = original
+        }
+
+        let timerFired = expectation(description: "checkpoint after remaining foreground second")
+        resumed.captureMobileTime = {
+            timerFired.fulfill()
+            return MobileTimePoint(epochMs: start.epochMs + 11_000, monotonicMs: 11_000)
+        }
+        resumed.mobileForeground(at: MobileTimePoint(epochMs: start.epochMs + 10_000, monotonicMs: 10_000))
+        resumed.trackingQueue.sync {}
+        await fulfillment(of: [timerFired], timeout: 5)
+        resumed.trackingQueue.sync {}
+
+        let beforeBackground = resumed.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            .filter { $0["event"] as? String == "$mobile_session_engagement" }
+        let durations = beforeBackground.compactMap {
+            ($0["eventProperties"] as? [String: Any])?["engagement_duration_ms"] as? Int64
+        }
+        XCTAssertEqual(durations, [9_000, 1_000])
+        let firstSid = (beforeBackground.first?["defaultProperties"] as? [String: Any])?["sid"] as? String
+        XCTAssertNotNil(firstSid)
+        XCTAssertEqual(firstSid, (beforeBackground.last?["defaultProperties"] as? [String: Any])?["sid"] as? String)
+        XCTAssertNotEqual(beforeBackground.first?["distinct_id"] as? String,
+                          beforeBackground.last?["distinct_id"] as? String)
+
+        resumed.mobileBackground(at: MobileTimePoint(epochMs: start.epochMs + 11_000, monotonicMs: 11_000))
+        resumed.trackingQueue.sync {}
+        let afterBackground = resumed.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            .filter { $0["event"] as? String == "$mobile_session_engagement" }
+        XCTAssertEqual(afterBackground.count, 2)
+    }
+}

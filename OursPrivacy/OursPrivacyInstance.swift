@@ -577,8 +577,10 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
     private func startMobileCheckpointTimer() {
         guard mobileCheckpointTimer == nil else { return }
         let interval = max(1, mobileCheckpointIntervalMs)
+        let remaining = mobileSession?.remainingEngagementThresholdMs ?? Int64(interval)
+        let firstInterval = min(interval, Int(clamping: remaining))
         let timer = DispatchSource.makeTimerSource(queue: trackingQueue)
-        timer.schedule(deadline: .now() + .milliseconds(interval),
+        timer.schedule(deadline: .now() + .milliseconds(firstInterval),
                        repeating: .milliseconds(interval))
         timer.setEventHandler { [weak self] in
             guard let self, !self.hasOptedOutTracking(),

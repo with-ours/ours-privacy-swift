@@ -153,6 +153,12 @@ final class MobileSession {
         withLock { state.firstOpenAccepted }
     }
 
+    var remainingEngagementThresholdMs: Int64 {
+        withLock {
+            engagedThresholdMs - (state.foregroundDurationMs ?? 0) % engagedThresholdMs
+        }
+    }
+
     func foreground(automaticEnabled: Bool, visitorId: String,
                     appVersion: String? = nil, appBuild: String? = nil,
                     at point: MobileTimePoint) -> [MobileFact] {
