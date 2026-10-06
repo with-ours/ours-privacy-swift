@@ -55,15 +55,18 @@ class ViewController: UIViewController {
         let optOut = makeActionButton("Opt Out", identifier: "optOut", action: #selector(optOut(_:)))
         let optIn = makeActionButton("Opt In", identifier: "optIn", action: #selector(optIn(_:)))
         let flush = makeActionButton("Flush", identifier: "flush", action: #selector(flush(_:)))
-        actionButtons = [deepLink, optOut, optIn, flush]
+        let schedule = makeActionButton("Schedule", identifier: "openSchedule", action: #selector(openSchedule(_:)))
+        let book = makeActionButton("Book Appointment", identifier: "bookAppointment", action: #selector(bookAppointment(_:)))
+        actionButtons = [deepLink, optOut, optIn, flush, schedule, book]
 
         let topRow = UIStackView(arrangedSubviews: [deepLink, optOut])
-        let bottomRow = UIStackView(arrangedSubviews: [optIn, flush])
-        for row in [topRow, bottomRow] {
+        let middleRow = UIStackView(arrangedSubviews: [optIn, flush])
+        let bottomRow = UIStackView(arrangedSubviews: [schedule, book])
+        for row in [topRow, middleRow, bottomRow] {
             row.distribution = .fillEqually
             row.spacing = 10
         }
-        let stack = UIStackView(arrangedSubviews: [topRow, bottomRow])
+        let stack = UIStackView(arrangedSubviews: [topRow, middleRow, bottomRow])
         stack.axis = .vertical
         stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -76,6 +79,7 @@ class ViewController: UIViewController {
             stack.trailingAnchor.constraint(equalTo: txtResults.trailingAnchor),
             stack.topAnchor.constraint(equalTo: btnRed.bottomAnchor, constant: 10),
             topRow.heightAnchor.constraint(equalToConstant: 35),
+            middleRow.heightAnchor.constraint(equalToConstant: 35),
             bottomRow.heightAnchor.constraint(equalToConstant: 35),
             txtResults.topAnchor.constraint(equalTo: stack.bottomAnchor, constant: 10)
         ])
@@ -140,6 +144,16 @@ class ViewController: UIViewController {
         guard let op = op else { return }
         op.trackDeepLink("https://example.com/?utm_source=demo&utm_medium=button&fbclid=abc123")
         appendResult("trackDeepLink(demo url)")
+    }
+
+    @IBAction func openSchedule(_ sender: Any) {
+        op?.trackScreen("Schedule")
+        appendResult("trackScreen(Schedule)")
+    }
+
+    @IBAction func bookAppointment(_ sender: Any) {
+        op?.track(event: "appointment_booked", properties: ["appointment_id": "synthetic-ios-appointment"])
+        appendResult("track(appointment_booked)")
     }
 
     // MARK: - Opt-in / opt-out
