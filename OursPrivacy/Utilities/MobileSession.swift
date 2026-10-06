@@ -125,6 +125,7 @@ final class MobileSession {
     private var replayPendingOnForeground: Bool
 
     private var isForeground = false
+    private var isPaused = false
     private var handledAutomaticForeground = false
     private var checkpointMonotonicMs: Int64?
     private var activeScreen: String?
@@ -220,16 +221,38 @@ final class MobileSession {
     func background(at point: MobileTimePoint) -> [MobileFact] {
         withLock {
             guard isForeground else { return [] }
-            let facts = engagement(at: point, force: true)
+            let facts = isPaused ? [] : engagement(at: point, force: true)
             if isLargeRollback(at: point.epochMs) {
                 clearSession()
                 persist()
                 return facts
             }
             isForeground = false
+            let wasPaused = isPaused
+            isPaused = false
             handledAutomaticForeground = false
             checkpointMonotonicMs = nil
             activeScreen = nil
+            if !wasPaused {
+                state.lastActiveAtMs = max(point.epochMs, state.startedAtMs ?? point.epochMs)
+            }
+            state.lastObservedWallMs = max(state.lastObservedWallMs ?? point.epochMs, point.epochMs)
+            persist()
+            return facts
+        }
+    }
+
+    func pauseActive(at point: MobileTimePoint) -> [MobileFact] {
+        withLock {
+            guard isForeground, !isPaused else { return [] }
+            let facts = engagement(at: point, force: true)
+            if isLargeRollback(at: point.epochMs) {
+                clearSession()
+                persist()
+                return facts
+            }
+            isPaused = true
+            checkpointMonotonicMs = nil
             state.lastActiveAtMs = max(point.epochMs, state.startedAtMs ?? point.epochMs)
             state.lastObservedWallMs = max(state.lastObservedWallMs ?? point.epochMs, point.epochMs)
             persist()
@@ -237,9 +260,26 @@ final class MobileSession {
         }
     }
 
+    func resumeActive(at point: MobileTimePoint) -> Bool {
+        withLock {
+            guard isForeground, isPaused else { return false }
+            if isLargeRollback(at: point.epochMs) {
+                clearSession()
+                persist()
+                return false
+            }
+            isPaused = false
+            checkpointMonotonicMs = point.monotonicMs
+            state.lastActiveAtMs = max(point.epochMs, state.startedAtMs ?? point.epochMs)
+            state.lastObservedWallMs = max(state.lastObservedWallMs ?? point.epochMs, point.epochMs)
+            persist()
+            return true
+        }
+    }
+
     func checkpoint(at point: MobileTimePoint) -> [MobileFact] {
         withLock {
-            guard isForeground else { return [] }
+            guard isForeground, !isPaused else { return [] }
             let rolledBack = isLargeRollback(at: point.epochMs)
             let facts = engagement(at: point, force: rolledBack)
             if rolledBack {
@@ -304,6 +344,7 @@ final class MobileSession {
                 at point: MobileTimePoint) -> [MobileFact] {
         withLock {
             let wasForeground = isForeground
+            let wasPaused = isPaused
             let wasAutomatic = handledAutomaticForeground
             let facts = isForeground ? engagement(at: point, force: true) : []
             clearSession()
@@ -312,8 +353,9 @@ final class MobileSession {
                                   appVersion: appVersion, appBuild: appBuild)
                 state.lastActiveAtMs = point.epochMs
                 isForeground = true
+                isPaused = wasPaused
                 handledAutomaticForeground = wasAutomatic
-                checkpointMonotonicMs = point.monotonicMs
+                checkpointMonotonicMs = wasPaused ? nil : point.monotonicMs
                 activeVisitorId = visitorId
                 activeAppVersion = appVersion
                 activeAppBuild = appBuild
@@ -379,6 +421,7 @@ final class MobileSession {
         state.automaticStartSid = nil
         state.foregroundDurationMs = nil
         isForeground = false
+        isPaused = false
         handledAutomaticForeground = false
         checkpointMonotonicMs = nil
         activeScreen = nil

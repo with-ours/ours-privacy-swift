@@ -77,6 +77,13 @@ protocol AppLifecycle {
     func applicationWillResignActive()
 }
 
+private enum MobileAppState {
+    case unknown
+    case active
+    case inactive
+    case background
+}
+
 public struct ProxyServerConfig {
     public init?(serverUrl: String, delegate: OursPrivacyProxyServerDelegate? = nil) {
         guard serverUrl != BasePath.DefaultAPIEndpoint else { return nil }
@@ -242,6 +249,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
     var mobilePendingRetryIntervalMs = 10_000
     private let trackingQueueKey = DispatchSpecificKey<Bool>()
     private var mobileLifecycleReady = false
+    private var mobileAppState = MobileAppState.unknown
     private var deferredMobileForeground: MobileTimePoint?
     private var mobileCheckpointTimer: DispatchSourceTimer?
     private var mobilePendingRetryTimer: DispatchSourceTimer?
@@ -425,7 +433,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
 
     @objc private func applicationWillResignActive(_ notification: Notification) {
         if mobileRuntimeEnabled {
-            mobileBackground(at: captureMobileTime())
+            mobilePause(at: captureMobileTime())
         }
         flushInstance.applicationWillResignActive()
 #if os(OSX)
@@ -437,6 +445,9 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
 
 #if !os(OSX) && !os(watchOS)
     @objc private func applicationDidEnterBackground(_ notification: Notification) {
+        if mobileRuntimeEnabled {
+            mobileBackground(at: captureMobileTime())
+        }
         guard let sharedApplication = OursPrivacy.sharedUIApplication() else {
             return
         }
@@ -553,12 +564,31 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
         trackingQueue.async { [weak self] in
             guard let self, self.mobileRuntimeEnabled else { return }
             guard self.mobileLifecycleReady else {
+                self.mobileAppState = .active
                 if self.deferredMobileForeground == nil {
                     self.deferredMobileForeground = point
                 }
                 return
             }
-            self.processMobileForeground(at: point)
+            switch self.mobileAppState {
+            case .inactive:
+                self.mobileAppState = .active
+                if !self.hasOptedOutTracking(), self.clearPrivacyQueueIfNeeded(),
+                   let mobileSession = self.mobileSession,
+                   mobileSession.resumeActive(at: point) {
+                    self.queuePendingMobileFacts()
+                    if self.trackAutomaticEventsEnabled {
+                        self.startMobileCheckpointTimer()
+                    }
+                } else {
+                    self.processMobileForeground(at: point)
+                }
+            case .background, .unknown:
+                self.mobileAppState = .active
+                self.processMobileForeground(at: point)
+            case .active:
+                self.queuePendingMobileFacts()
+            }
         }
     }
 
@@ -593,9 +623,30 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
         timer.resume()
     }
 
+    func mobilePause(at point: MobileTimePoint) {
+        trackingQueue.async { [weak self] in
+            guard let self, self.mobileRuntimeEnabled,
+                  self.mobileAppState != .inactive, self.mobileAppState != .background else { return }
+            let wasActive = self.mobileAppState == .active
+            self.mobileAppState = .inactive
+            self.mobileCheckpointTimer?.cancel()
+            self.mobileCheckpointTimer = nil
+            guard self.mobileLifecycleReady else {
+                self.deferredMobileForeground = nil
+                return
+            }
+            guard wasActive, !self.hasOptedOutTracking(), let mobileSession = self.mobileSession else { return }
+            _ = mobileSession.pauseActive(at: point)
+            guard self.clearPrivacyQueueIfNeeded() else { return }
+            self.queuePendingMobileFacts()
+        }
+    }
+
     func mobileBackground(at point: MobileTimePoint) {
         trackingQueue.async { [weak self] in
             guard let self, self.mobileRuntimeEnabled else { return }
+            guard self.mobileAppState != .background else { return }
+            self.mobileAppState = .background
             self.mobileCheckpointTimer?.cancel()
             self.mobileCheckpointTimer = nil
             guard self.mobileLifecycleReady else {
@@ -710,7 +761,10 @@ extension OursPrivacy {
                 self.mobileLifecycleReady = true
                 if self.mobileRuntimeEnabled {
                     self.queuePendingMobileFacts()
-                    if let point = self.deferredMobileForeground ?? activePoint {
+                    if self.mobileAppState == .active, let point = self.deferredMobileForeground {
+                        self.processMobileForeground(at: point)
+                    } else if self.mobileAppState == .unknown, let point = activePoint {
+                        self.mobileAppState = .active
                         self.processMobileForeground(at: point)
                     }
                 }
@@ -1150,6 +1204,10 @@ extension OursPrivacy {
                     self.automaticEvents.registerPurchaseObserver()
                 }
             #endif
+            if self.mobileRuntimeEnabled, self.mobileLifecycleReady,
+               self.mobileAppState == .active {
+                self.processMobileForeground(at: self.captureMobileTime())
+            }
             if shouldIdentify {
                 self.enqueueIdentify(capturedUserProperties, at: self.captureMobileTime(),
                                      completion: nil)

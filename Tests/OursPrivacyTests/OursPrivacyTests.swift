@@ -849,6 +849,10 @@ final class OursPrivacyTests: XCTestCase {
         await assertResumedTimerCheckpointsCumulativeEngagement(recreate: true)
     }
 
+    func testInactiveOnlyResumeTimerUsesRemainingCumulativeSecond() async {
+        await assertResumedTimerCheckpointsCumulativeEngagement(recreate: false, inactiveOnly: true)
+    }
+
     func testManualMobileEventHasSessionWithAutomaticEventsOff() async {
         let op = makeMobileInstance()
         op.trackAutomaticEventsEnabled = false

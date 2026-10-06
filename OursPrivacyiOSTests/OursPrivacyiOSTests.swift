@@ -123,6 +123,143 @@ struct OursPrivacyiOSTests {
         #expect(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
     }
 
+    @Test @MainActor func inactiveOnlyResumePausesEngagementWithoutAnotherOpen() async {
+        let op = OursPrivacy(token: "ios-inactive-\(UUID().uuidString)", trackAutomaticEvents: true)
+        let clock = LockedTestMobileTime(MobileTimePoint.capture())
+        op.captureMobileTime = { clock.capture() }
+        op.mobileQueueNowMs = { clock.capture().epochMs }
+        await op.initialize()
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        op.trackingQueue.sync {}
+        let first = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let sid = (first.first?["defaultProperties"] as? [String: Any])?["sid"] as? String
+
+        clock.advance(by: 9_000)
+        NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+        op.trackingQueue.sync {}
+        clock.advance(by: 60_000)
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        op.trackingQueue.sync {}
+        clock.advance(by: 1_000)
+        NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        op.trackingQueue.sync {}
+
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let durations = items.filter { $0["event"] as? String == "$mobile_session_engagement" }
+            .compactMap { ($0["eventProperties"] as? [String: Any])?["engagement_duration_ms"] as? Int64 }
+        #expect(durations == [9_000, 1_000])
+        #expect(items.filter { $0["event"] as? String == "$mobile_app_open" }.count == 1)
+        #expect(items.filter { $0["event"] as? String == "$mobile_session_start" }.count == 1)
+        #expect(items.allSatisfy {
+            ($0["defaultProperties"] as? [String: Any])?["sid"] as? String == sid
+        })
+    }
+
+    @Test @MainActor func realBackgroundThenActiveRecordsOneWarmOpen() async {
+        let op = OursPrivacy(token: "ios-background-\(UUID().uuidString)", trackAutomaticEvents: true)
+        let clock = LockedTestMobileTime(MobileTimePoint.capture())
+        op.captureMobileTime = { clock.capture() }
+        op.mobileQueueNowMs = { clock.capture().epochMs }
+        await op.initialize()
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        op.trackingQueue.sync {}
+        let first = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let sid = (first.first?["defaultProperties"] as? [String: Any])?["sid"] as? String
+
+        clock.advance(by: 9_000)
+        NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+        clock.advance(by: 60_000)
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        clock.advance(by: 1_000)
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        op.trackingQueue.sync {}
+
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        #expect(items.filter { $0["event"] as? String == "$mobile_app_open" }.count == 2)
+        #expect(items.filter { $0["event"] as? String == "$mobile_session_start" }.count == 1)
+        let opens = items.filter { $0["event"] as? String == "$mobile_app_open" }
+        #expect(opens.allSatisfy {
+            ($0["defaultProperties"] as? [String: Any])?["sid"] as? String == sid
+        })
+        let durations = items.filter { $0["event"] as? String == "$mobile_session_engagement" }
+            .compactMap { ($0["eventProperties"] as? [String: Any])?["engagement_duration_ms"] as? Int64 }
+        #expect(durations == [9_000])
+    }
+
+    @Test @MainActor func activeOptInQueuesCanonicalOpenBeforeOptInOnce() async {
+        let op = OursPrivacy(token: "ios-opt-in-active-\(UUID().uuidString)", trackAutomaticEvents: true)
+        let clock = LockedTestMobileTime(MobileTimePoint.capture())
+        op.captureMobileTime = { clock.capture() }
+        op.mobileQueueNowMs = { clock.capture().epochMs }
+        await op.initialize(options: OursPrivacyInitOptions(optedOutByDefault: true))
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        op.trackingQueue.sync {}
+        #expect(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+
+        op.optInTracking()
+        op.trackingQueue.sync {}
+        op.trackingQueue.sync {}
+
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let names = items.compactMap { $0["event"] as? String }
+        #expect(names == ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start", "$opt_in"])
+        #expect(op.mobileSession?.hasAcceptedFirstOpen == true)
+        let sid = (items.first?["defaultProperties"] as? [String: Any])?["sid"] as? String
+        #expect(!((sid ?? "").isEmpty))
+        #expect(items.allSatisfy {
+            ($0["defaultProperties"] as? [String: Any])?["sid"] as? String == sid
+        })
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        op.trackingQueue.sync {}
+        #expect(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).count == items.count)
+    }
+
+    @Test @MainActor func activeOptInWithAutomaticOffQueuesOnlyManualOptIn() async {
+        let op = OursPrivacy(token: "ios-opt-in-manual-\(UUID().uuidString)", trackAutomaticEvents: false)
+        await op.initialize(options: OursPrivacyInitOptions(optedOutByDefault: true))
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        op.trackingQueue.sync {}
+        op.optInTracking()
+        op.trackingQueue.sync {}
+        op.trackingQueue.sync {}
+
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        #expect(items.compactMap { $0["event"] as? String } == ["$opt_in"])
+        #expect((items.first?["defaultProperties"] as? [String: Any])?["sid"] is String)
+    }
+
+    @Test @MainActor func activeOptInAfterTrackedOpenRotatesSessionWithoutRepeatingFirstOpen() async {
+        let op = OursPrivacy(token: "ios-opt-in-again-\(UUID().uuidString)", trackAutomaticEvents: true)
+        await op.initialize()
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        op.trackingQueue.sync {}
+        let initial = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let initialSid = (initial.first?["defaultProperties"] as? [String: Any])?["sid"] as? String
+        let initialVisitor = initial.first?["visitor_id"] as? String
+        #expect(op.mobileSession?.hasAcceptedFirstOpen == true)
+
+        op.optOutTracking()
+        op.trackingQueue.sync {}
+        #expect(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+        op.optInTracking()
+        op.trackingQueue.sync {}
+        op.trackingQueue.sync {}
+
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        #expect(items.compactMap { $0["event"] as? String } ==
+            ["$mobile_app_open", "$mobile_session_start", "$opt_in"])
+        let newSid = (items.first?["defaultProperties"] as? [String: Any])?["sid"] as? String
+        #expect(newSid != initialSid)
+        #expect(items.allSatisfy {
+            ($0["defaultProperties"] as? [String: Any])?["sid"] as? String == newSid
+        })
+        #expect(items.allSatisfy { $0["visitor_id"] as? String == op.visitorId })
+        #expect(op.visitorId != initialVisitor)
+    }
+
     @Test @MainActor func iosManualScreenReentersAndRotatesAtExactInactivityTimeout() async throws {
         let op = OursPrivacy(token: "ios-screen-reentry-\(UUID().uuidString)",
                              trackAutomaticEvents: false)
@@ -137,6 +274,7 @@ struct OursPrivacyiOSTests {
         op.trackingQueue.sync {}
         clock.advance(by: 1_000)
         NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
         op.trackingQueue.sync {}
         clock.advance(by: 1_799_999)
         NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
@@ -146,6 +284,7 @@ struct OursPrivacyiOSTests {
 
         clock.advance(by: 1_000)
         NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
         op.trackingQueue.sync {}
         clock.advance(by: 1_800_000)
         NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)

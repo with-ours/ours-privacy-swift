@@ -114,14 +114,31 @@ final class OursPrivacyiOSDemoUITests: XCTestCase {
         let captured = try events(token: token, recorderURL: recorderURL)
         XCTAssertEqual(captured.filter { $0["event"] as? String == "$mobile_first_open" }.count, 1)
         let appOpens = captured.enumerated().filter { $0.element["event"] as? String == "$mobile_app_open" }
-        XCTAssertEqual(appOpens.count, 2)
+        XCTAssertEqual(appOpens.count, 3)
         let coldOpen = try XCTUnwrap(appOpens.first)
-        let warmOpen = try XCTUnwrap(appOpens.last)
+        let warmOpen = try XCTUnwrap(appOpens.dropFirst().first)
+        let optInOpen = try XCTUnwrap(appOpens.last)
+        let sessionStarts = captured.enumerated().filter {
+            $0.element["event"] as? String == "$mobile_session_start"
+        }
+        XCTAssertEqual(sessionStarts.count, 2)
+        let optInStart = try XCTUnwrap(sessionStarts.last)
+        let optInIndex = try XCTUnwrap(captured.firstIndex { $0["event"] as? String == "$opt_in" })
+        let newVisitorId = try XCTUnwrap(optInOpen.element["visitor_id"] as? String)
+        let newSid = try XCTUnwrap((optInOpen.element["defaultProperties"] as? [String: Any])?["sid"] as? String)
+        XCTAssertNotEqual(newVisitorId, visitorId)
+        XCTAssertNotEqual(newSid, sid)
+        XCTAssertEqual(optInStart.element["visitor_id"] as? String, newVisitorId)
+        XCTAssertEqual((optInStart.element["defaultProperties"] as? [String: Any])?["sid"] as? String, newSid)
+        XCTAssertEqual(captured[optInIndex]["visitor_id"] as? String, newVisitorId)
+        XCTAssertEqual((captured[optInIndex]["defaultProperties"] as? [String: Any])?["sid"] as? String, newSid)
+        XCTAssertGreaterThanOrEqual(optInOpen.offset, beforeOptOut)
+        XCTAssertLessThan(optInOpen.offset, optInStart.offset)
+        XCTAssertLessThan(optInStart.offset, optInIndex)
         for appOpen in [coldOpen.element, warmOpen.element] {
             XCTAssertEqual(appOpen["visitor_id"] as? String, visitorId)
             XCTAssertEqual((appOpen["defaultProperties"] as? [String: Any])?["sid"] as? String, sid)
         }
-        XCTAssertEqual(captured.filter { $0["event"] as? String == "$mobile_session_start" }.count, 1)
         let automatic = captured.filter {
             let name = $0["event"] as? String
             return name?.hasPrefix("$mobile_") == true || name?.hasPrefix("$ae_") == true
@@ -143,6 +160,7 @@ final class OursPrivacyiOSDemoUITests: XCTestCase {
         XCTAssertLessThan(screenIndex, bookingIndex)
         XCTAssertLessThan(engagementIndex, warmOpen.offset)
         XCTAssertGreaterThanOrEqual(warmOpen.offset, beforeResume.count)
+        XCTAssertLessThan(warmOpen.offset, beforeOptOut)
         for event in [firstOpen, sessionStart, screen, booking, engagement] {
             let defaults = try XCTUnwrap(event["defaultProperties"] as? [String: Any])
             XCTAssertEqual(defaults["mobile_platform"] as? String, "ios")

@@ -98,6 +98,58 @@ final class MobileSessionTests: XCTestCase {
         XCTAssertTrue(session.background(at: point(20_000)).isEmpty)
     }
 
+    func testInactiveResumeExcludesPausedTimeAndKeepsCumulativeThreshold() {
+        let session = makeSession()
+        let opened = session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(0))
+
+        let paused = session.pauseActive(at: point(9_000))
+        XCTAssertEqual(paused.map(\.name), ["$mobile_session_engagement"])
+        XCTAssertEqual(paused.first?.properties["engagement_duration_ms"] as? Int64, 9_000)
+        XCTAssertEqual(session.remainingEngagementThresholdMs, 1_000)
+        XCTAssertTrue(session.checkpoint(at: point(1_900_000)).isEmpty)
+        XCTAssertTrue(session.resumeActive(at: point(1_900_000)))
+        XCTAssertFalse(session.resumeActive(at: point(1_900_000)))
+        XCTAssertTrue(session.foreground(automaticEnabled: true, visitorId: "visitor-a",
+                                         at: point(1_900_000)).isEmpty)
+        XCTAssertTrue(session.checkpoint(at: point(1_900_999)).isEmpty)
+        let boundary = session.checkpoint(at: point(1_901_000))
+        XCTAssertEqual(boundary.map(\.name), ["$mobile_session_engagement"])
+        XCTAssertEqual(boundary.first?.properties["engagement_duration_ms"] as? Int64, 1_000)
+        XCTAssertEqual(boundary.first?.sid, opened.first?.sid)
+        XCTAssertTrue(session.background(at: point(1_901_000)).isEmpty)
+    }
+
+    func testRealBackgroundAfterPauseAllowsOneWarmOpen() {
+        let session = makeSession()
+        let opened = session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(0))
+        _ = session.pauseActive(at: point(9_000))
+        XCTAssertTrue(session.background(at: point(60_000)).isEmpty)
+
+        let warm = session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(61_000))
+
+        XCTAssertEqual(warm.map(\.name), ["$mobile_app_open"])
+        XCTAssertEqual(warm.first?.sid, opened.first?.sid)
+        XCTAssertTrue(session.foreground(automaticEnabled: true, visitorId: "visitor-a",
+                                         at: point(61_000)).isEmpty)
+        XCTAssertEqual(session.background(at: point(62_000)).first?
+            .properties["engagement_duration_ms"] as? Int64, 1_000)
+    }
+
+    func testBackgroundTimeoutStartsAtPauseBoundary() {
+        let session = makeSession()
+        let opened = session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(0))
+        _ = session.pauseActive(at: point(9_000))
+        _ = session.background(at: point(60_000))
+
+        let expired = session.foreground(automaticEnabled: true, visitorId: "visitor-a",
+                                         at: point(1_809_000))
+
+        XCTAssertEqual(expired.map(\.name),
+                       ["$mobile_session_end", "$mobile_app_open", "$mobile_session_start"])
+        XCTAssertEqual(expired.first?.sid, opened.first?.sid)
+        XCTAssertNotEqual(expired[1].sid, opened.first?.sid)
+    }
+
     func testProcessRecreationReplaysPendingFirstOpenWithFrozenContext() {
         let name = "recreation-\(UUID().uuidString)"
         let first = makeSession(name)
@@ -551,7 +603,7 @@ final class MobileSessionTests: XCTestCase {
 }
 
 extension OursPrivacyTests {
-    func assertResumedTimerCheckpointsCumulativeEngagement(recreate: Bool) async {
+    func assertResumedTimerCheckpointsCumulativeEngagement(recreate: Bool, inactiveOnly: Bool = false) async {
         let name = "resumed-checkpoint-\(UUID().uuidString)"
         let makeInstance = { () -> OursPrivacy in
             let instance = OursPrivacy(token: name, trackAutomaticEvents: true)
@@ -566,7 +618,12 @@ extension OursPrivacyTests {
         let start = MobileTimePoint(epochMs: Int64(Date().timeIntervalSince1970 * 1_000), monotonicMs: 0)
         original.mobileQueueNowMs = { start.epochMs + 20_000 }
         original.mobileForeground(at: start)
-        original.mobileBackground(at: MobileTimePoint(epochMs: start.epochMs + 9_000, monotonicMs: 9_000))
+        let paused = MobileTimePoint(epochMs: start.epochMs + 9_000, monotonicMs: 9_000)
+        if inactiveOnly {
+            original.mobilePause(at: paused)
+        } else {
+            original.mobileBackground(at: paused)
+        }
         original.trackingQueue.sync {}
         let initialEngagement = original.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
             .filter { $0["event"] as? String == "$mobile_session_engagement" }
