@@ -401,6 +401,137 @@ final class MobileSessionTests: XCTestCase {
         XCTAssertEqual(second[1].properties["screen_name"] as? String, "Booking")
     }
 
+    func testScreenDeltaContributesToNextPeriodicThresholdWithoutOverlap() {
+        let session = makeSession()
+        let opened = session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(0))
+        _ = session.screen("Schedule", visitorId: "visitor-a", at: point(0))
+
+        let changed = session.screen("Booking", visitorId: "visitor-a", at: point(9_000))
+        XCTAssertEqual(changed.map(\.name), ["$mobile_session_engagement", "$mobile_screen_view"])
+        XCTAssertTrue(session.checkpoint(at: point(9_999)).isEmpty)
+        let boundary = session.checkpoint(at: point(10_000))
+        XCTAssertEqual(boundary.map(\.name), ["$mobile_session_engagement"])
+        XCTAssertEqual(changed[0].properties["engagement_duration_ms"] as? Int64, 9_000)
+        XCTAssertEqual(changed[0].properties["screen_name"] as? String, "Schedule")
+        XCTAssertEqual(boundary.first?.properties["engagement_duration_ms"] as? Int64, 1_000)
+        XCTAssertEqual(boundary.first?.properties["screen_name"] as? String, "Booking")
+        XCTAssertEqual(changed[0].sid, opened[0].sid)
+        XCTAssertEqual(boundary.first?.sid, opened[0].sid)
+        XCTAssertNotEqual(changed[0].distinctId, boundary.first?.distinctId)
+
+        XCTAssertTrue(session.checkpoint(at: point(10_000)).isEmpty)
+        XCTAssertTrue(session.checkpoint(at: point(19_999)).isEmpty)
+        let next = session.checkpoint(at: point(20_000))
+        XCTAssertEqual(next.map(\.name), ["$mobile_session_engagement"])
+        XCTAssertEqual(next.first?.properties["engagement_duration_ms"] as? Int64, 10_000)
+        XCTAssertTrue(session.background(at: point(20_000)).isEmpty)
+    }
+
+    func testCumulativeThresholdSurvivesProcessRecreation() {
+        let name = "cumulative-recreation-\(UUID().uuidString)"
+        let first = makeSession(name)
+        let opened = first.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(0))
+        _ = first.screen("Schedule", visitorId: "visitor-a", at: point(0))
+        let changed = first.screen("Booking", visitorId: "visitor-a", at: point(9_000))
+        XCTAssertEqual(changed[0].properties["engagement_duration_ms"] as? Int64, 9_000)
+
+        let restored = makeSession(name)
+        let reopened = restored.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(9_000))
+        XCTAssertEqual(reopened.last?.sid, opened[0].sid)
+        _ = restored.screen("Booking", visitorId: "visitor-a", at: point(9_000))
+        let boundary = restored.checkpoint(at: point(10_000))
+        XCTAssertEqual(boundary.map(\.name), ["$mobile_session_engagement"])
+        XCTAssertEqual(boundary.first?.properties["engagement_duration_ms"] as? Int64, 1_000)
+        XCTAssertEqual(boundary.first?.properties["screen_name"] as? String, "Booking")
+        XCTAssertEqual(boundary.first?.sid, changed[0].sid)
+        XCTAssertNotEqual(boundary.first?.distinctId, changed[0].distinctId)
+        XCTAssertTrue(restored.checkpoint(at: point(10_000)).isEmpty)
+    }
+
+    func testBackgroundDeltaContributesToNextPeriodicThreshold() {
+        let session = makeSession()
+        let opened = session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(0))
+        let background = session.background(at: point(9_000))
+        XCTAssertEqual(background.first?.properties["engagement_duration_ms"] as? Int64, 9_000)
+
+        let reopened = session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(10_000))
+        XCTAssertEqual(reopened.map(\.name), ["$mobile_app_open"])
+        let boundary = session.checkpoint(at: point(11_000))
+        XCTAssertEqual(boundary.map(\.name), ["$mobile_session_engagement"])
+        XCTAssertEqual(boundary.first?.properties["engagement_duration_ms"] as? Int64, 1_000)
+        XCTAssertEqual(boundary.first?.sid, opened[0].sid)
+        XCTAssertNotEqual(boundary.first?.distinctId, background[0].distinctId)
+        XCTAssertTrue(session.background(at: point(11_000)).isEmpty)
+    }
+
+    func testFreshPeriodicCheckpointEmitsAtExactlyTenSeconds() {
+        let session = makeSession()
+        _ = session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(0))
+
+        XCTAssertTrue(session.checkpoint(at: point(9_999)).isEmpty)
+        let boundary = session.checkpoint(at: point(10_000))
+        XCTAssertEqual(boundary.map(\.name), ["$mobile_session_engagement"])
+        XCTAssertEqual(boundary.first?.properties["engagement_duration_ms"] as? Int64, 10_000)
+        XCTAssertTrue(session.checkpoint(at: point(10_000)).isEmpty)
+    }
+
+    func testOlderStoredSessionWithoutCumulativeFieldKeepsItsSession() {
+        let name = "legacy-duration-\(UUID().uuidString)"
+        let first = makeSession(name)
+        let opened = first.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(0))
+        _ = first.background(at: point(9_000))
+
+        let defaults = UserDefaults(suiteName: OursPrivacyUserDefaultsKeys.suiteName)
+        let key = "oursprivacy-\(name)-OPMobileSession"
+        guard let data = defaults?.data(forKey: key),
+              var stored = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            XCTFail("Expected stored session")
+            return
+        }
+        stored.removeValue(forKey: "foregroundDurationMs")
+        guard let olderData = try? JSONSerialization.data(withJSONObject: stored) else {
+            XCTFail("Expected serializable session")
+            return
+        }
+        defaults?.set(olderData, forKey: key)
+
+        let restored = makeSession(name)
+        let reopened = restored.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(10_000))
+        XCTAssertEqual(reopened.last?.sid, opened[0].sid)
+        let boundary = restored.checkpoint(at: point(20_000))
+        XCTAssertEqual(boundary.map(\.name), ["$mobile_session_engagement"])
+        XCTAssertEqual(boundary.first?.properties["engagement_duration_ms"] as? Int64, 10_000)
+    }
+
+    func testSessionRotationResetsCumulativeDuration() {
+        let session = makeSession()
+        let opened = session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(0))
+        let first = session.screen("Schedule", visitorId: "visitor-a", at: point(9_000))
+        XCTAssertEqual(first[0].properties["engagement_duration_ms"] as? Int64, 9_000)
+
+        _ = session.rotate(to: "visitor-b", appVersion: nil, appBuild: nil, at: point(9_000))
+        let next = session.snapshot(visitorId: "visitor-b", at: point(9_000))
+        XCTAssertNotEqual(next.sid, opened[0].sid)
+        XCTAssertTrue(session.checkpoint(at: point(10_000)).isEmpty)
+        let boundary = session.checkpoint(at: point(19_000))
+        XCTAssertEqual(boundary.map(\.name), ["$mobile_session_engagement"])
+        XCTAssertEqual(boundary.first?.properties["engagement_duration_ms"] as? Int64, 10_000)
+        XCTAssertEqual(boundary.first?.sid, next.sid)
+    }
+
+    func testManualSessionAndOptOutDoNotEmitAutomaticEngagement() {
+        let session = makeSession()
+        XCTAssertTrue(session.foreground(automaticEnabled: false, visitorId: "visitor-a", at: point(0)).isEmpty)
+        XCTAssertEqual(session.screen("Schedule", visitorId: "visitor-a", at: point(9_000)).map(\.name),
+                       ["$mobile_screen_view"])
+        XCTAssertTrue(session.checkpoint(at: point(10_000)).isEmpty)
+        XCTAssertTrue(session.background(at: point(20_000)).isEmpty)
+        session.disable()
+        XCTAssertTrue(session.checkpoint(at: point(30_000)).isEmpty)
+        XCTAssertTrue(session.background(at: point(30_000)).isEmpty)
+        XCTAssertFalse(session.pendingFacts.contains { $0.name == "$mobile_session_engagement" })
+    }
+
     func testExplicitScreenAdvancesInactivityBoundaryWithoutAutomaticLifecycle() {
         let session = makeSession()
         let first = session.screen("Schedule", visitorId: "visitor-a", at: point(0))[0]

@@ -110,6 +110,7 @@ final class MobileSession {
         var sessionAppVersion: String?
         var sessionAppBuild: String?
         var automaticStartSid: String?
+        var foregroundDurationMs: Int64?
         var pendingFacts: [MobileFact] = []
         var firstOpenAccepted = false
         var observedAppVersion: String?
@@ -370,6 +371,7 @@ final class MobileSession {
         state.sessionAppVersion = nil
         state.sessionAppBuild = nil
         state.automaticStartSid = nil
+        state.foregroundDurationMs = nil
         isForeground = false
         handledAutomaticForeground = false
         checkpointMonotonicMs = nil
@@ -428,8 +430,13 @@ final class MobileSession {
         guard handledAutomaticForeground, let previous = checkpointMonotonicMs,
               let visitorId = activeVisitorId else { return [] }
         let duration = max(0, point.monotonicMs - previous)
-        guard duration > 0, force || duration >= engagedThresholdMs else { return [] }
+        let priorDuration = state.foregroundDurationMs ?? 0
+        guard duration > 0,
+              force || (priorDuration + duration) / engagedThresholdMs > priorDuration / engagedThresholdMs else {
+            return []
+        }
         checkpointMonotonicMs = point.monotonicMs
+        state.foregroundDurationMs = priorDuration + duration
         var values: [String: MobileValue] = ["engagement_duration_ms": .milliseconds(duration)]
         if let activeScreen = activeScreen { values["screen_name"] = .text(activeScreen) }
         let snapshot = currentSnapshot(visitorId: visitorId,
