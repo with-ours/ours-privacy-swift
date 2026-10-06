@@ -301,7 +301,7 @@ final class OursPrivacyTests: XCTestCase {
         let p = AutomaticProperties.defaultProperties
         XCTAssertNotNil(p["device_vendor"])
         XCTAssertNotNil(p["device_model"])
-        XCTAssertEqual(p["version"] as? String, "swift@3.0.0")
+        XCTAssertEqual(p["version"] as? String, "swift@3.1.0")
         // device_type / os_name / os_version / screen_* depend on the host
         // platform; at minimum the cross-platform anchors must be present.
         // Legacy dollar-prefixed / snake_case keys must be absent.
@@ -806,7 +806,7 @@ final class OursPrivacyTests: XCTestCase {
                 .range(of: timestampPattern, options: .regularExpression))
             XCTAssertNotNil((defaults?["mobile_session_started_at"] as? String)?
                 .range(of: timestampPattern, options: .regularExpression))
-            XCTAssertEqual(defaults?["version"] as? String, "swift@3.0.0")
+            XCTAssertEqual(defaults?["version"] as? String, "swift@3.1.0")
             if let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
                 XCTAssertEqual(defaults?["app_version"] as? String, appVersion)
             }

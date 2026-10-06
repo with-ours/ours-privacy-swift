@@ -9,7 +9,7 @@
         "os_version": "Version 26.4.1 (Build 25E253)",
         "screen_height": 1080,
         "screen_width": 1920,
-        "version": "swift@3.0.0"
+        "version": "swift@3.1.0"
       },
       "distinct_id": "D8FBA88E-1814-4583-9611-BEA48FA3E887",
       "event": "$identify",
@@ -30,7 +30,7 @@
         "os_version": "Version 26.4.1 (Build 25E253)",
         "screen_height": 1080,
         "screen_width": 1920,
-        "version": "swift@3.0.0"
+        "version": "swift@3.1.0"
       },
       "distinct_id": "959B1318-43B7-4C54-A2E3-B7585F16B2C6",
       "event": "Probe Event",
@@ -51,7 +51,7 @@
         "os_version": "Version 26.4.1 (Build 25E253)",
         "screen_height": 1080,
         "screen_width": 1920,
-        "version": "swift@3.0.0"
+        "version": "swift@3.1.0"
       },
       "distinct_id": "C61984CA-DDDE-4029-BE2B-F2E2C5EF6E9E",
       "event": "Probe Event With Many Props",
@@ -73,7 +73,7 @@
         "os_version": "Version 26.4.1 (Build 25E253)",
         "screen_height": 1080,
         "screen_width": 1920,
-        "version": "swift@3.0.0"
+        "version": "swift@3.1.0"
       },
       "distinct_id": "977C92D7-ABA6-4D19-8561-C32D11F84DC8",
       "event": "Probe Event With User Props",

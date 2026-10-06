@@ -21,7 +21,7 @@ import WatchKit
 /// `martech/packages/types/src/event.ts`. Unknown keys are stripped server-side,
 /// so anything added here without a matching schema field is dead weight.
 class AutomaticProperties {
-    static let sdkVersion = "3.0.0"
+    static let sdkVersion = "3.1.0"
 
     static var appVersion: String? {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
