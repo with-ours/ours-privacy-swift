@@ -72,6 +72,11 @@ private struct PersistedEventTransfer: @unchecked Sendable {
     let value: Queue
 }
 
+private struct PendingOptIn {
+    var identify: InternalProperties?
+    let event: InternalProperties
+}
+
 protocol AppLifecycle {
     func applicationDidBecomeActive()
     func applicationWillResignActive()
@@ -253,6 +258,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
     private var deferredMobileForeground: MobileTimePoint?
     private var mobileCheckpointTimer: DispatchSourceTimer?
     private var mobilePendingRetryTimer: DispatchSourceTimer?
+    private var pendingOptIns: [PendingOptIn] = []
 
     let readWriteLock: ReadWriteLock
 #if !os(OSX) && !os(watchOS)
@@ -511,6 +517,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
     }
 
     private func queuePendingMobileFacts() {
+        defer { drainPendingOptIns() }
         guard mobileRuntimeEnabled, !hasOptedOutTracking(),
               !oursprivacyPersistence.hasPendingPrivacyClear, let mobileSession else { return }
         let queued = oursprivacyPersistence.loadEntitiesInBatch(type: .events)
@@ -543,6 +550,32 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
         } else {
             mobilePendingRetryTimer?.cancel()
             mobilePendingRetryTimer = nil
+        }
+    }
+
+    private func drainPendingOptIns() {
+        guard !pendingOptIns.isEmpty, !hasOptedOutTracking(),
+              !oursprivacyPersistence.hasPendingPrivacyClear else { return }
+        let now = mobileQueueNowMs()
+        let dueOpenPending = mobileSession?.pendingFacts.contains {
+            ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start"].contains($0.name) &&
+                $0.occurredAtMs <= now
+        } ?? false
+        guard !dueOpenPending else { return }
+
+        while !pendingOptIns.isEmpty {
+            if let identify = pendingOptIns[0].identify {
+                guard oursprivacyPersistence.saveEntity(identify, type: .events) else {
+                    scheduleMobilePendingRetry(after: max(1, mobilePendingRetryIntervalMs))
+                    return
+                }
+                pendingOptIns[0].identify = nil
+            }
+            guard oursprivacyPersistence.saveEntity(pendingOptIns[0].event, type: .events) else {
+                scheduleMobilePendingRetry(after: max(1, mobilePendingRetryIntervalMs))
+                return
+            }
+            pendingOptIns.removeFirst()
         }
     }
 
@@ -587,7 +620,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
                 self.mobileAppState = .active
                 self.processMobileForeground(at: point)
             case .active:
-                self.queuePendingMobileFacts()
+                self.processMobileForeground(at: point)
             }
         }
     }
@@ -870,6 +903,7 @@ extension OursPrivacy {
             guard let self = self else { return }
             self.mobilePendingRetryTimer?.cancel()
             self.mobilePendingRetryTimer = nil
+            self.pendingOptIns.removeAll()
             let nextVisitorId = self.newVisitorId()
             if self.mobileRuntimeEnabled, let mobileSession = self.mobileSession {
                 _ = mobileSession.rotate(to: nextVisitorId,
@@ -1165,6 +1199,7 @@ extension OursPrivacy {
             self.mobileCheckpointTimer = nil
             self.mobilePendingRetryTimer?.cancel()
             self.mobilePendingRetryTimer = nil
+            self.pendingOptIns.removeAll()
             self.readWriteLock.write {
                 self.optOutStatus = true
             }
@@ -1190,6 +1225,10 @@ extension OursPrivacy {
         let capturedProperties = PropertySnapshot(properties)
         let capturedUserProperties = PropertySnapshot(userProperties?.toWireProperties())
         let shouldIdentify = userProperties != nil
+        let point = captureMobileTime()
+        #if os(iOS) || os(tvOS) || os(visionOS)
+            AutomaticProperties.primeUIPropertiesIfOnMain()
+        #endif
         trackingQueue.async { [weak self, capturedProperties, capturedUserProperties, shouldIdentify] in
             guard let self = self else { return }
             guard self.clearPrivacyQueueIfNeeded() else { return }
@@ -1206,13 +1245,21 @@ extension OursPrivacy {
             #endif
             if self.mobileRuntimeEnabled, self.mobileLifecycleReady,
                self.mobileAppState == .active {
-                self.processMobileForeground(at: self.captureMobileTime())
+                self.processMobileForeground(at: point)
             }
-            if shouldIdentify {
-                self.enqueueIdentify(capturedUserProperties, at: self.captureMobileTime(),
-                                     completion: nil)
-            }
-            self.track(event: "$opt_in", properties: capturedProperties.decode())
+            let context = self.currentEventContext(at: point)
+            let identify = shouldIdentify
+                ? self.trackInstance.composeIdentifyEvent(userProperties: capturedUserProperties.decode(),
+                                                          context: context)
+                : nil
+            let event = self.trackInstance.composeTrackEvent(event: "$opt_in",
+                                                             eventProperties: capturedProperties.decode(),
+                                                             userProperties: nil, context: context)
+            self.pendingOptIns.append(PendingOptIn(identify: identify, event: event))
+            self.queuePendingMobileFacts()
+        }
+        if OursPrivacy.isiOSAppExtension() {
+            flushAutomatically()
         }
     }
 

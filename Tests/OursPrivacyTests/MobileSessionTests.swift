@@ -603,6 +603,156 @@ final class MobileSessionTests: XCTestCase {
 }
 
 extension OursPrivacyTests {
+    func testActiveOptInQueuesDueOpenBeforeOptInAfterTwoFailedWrites() async {
+        let op = makeMobileInstance()
+        await op.initialize(options: OursPrivacyInitOptions(optedOutByDefault: true))
+        let point = mobilePoint()
+        op.captureMobileTime = { point }
+        op.mobileQueueNowMs = { point.epochMs + 1_000 }
+        op.mobilePendingRetryIntervalMs = 60_000
+        op.mobileForeground(at: point)
+        op.trackingQueue.sync {}
+        XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+
+        let persist = op.oursprivacyPersistence.persistenceWrite
+        var failedWrites = 0
+        op.oursprivacyPersistence.persistenceWrite = { data in
+            if failedWrites < 2 {
+                failedWrites += 1
+                return false
+            }
+            return persist(data)
+        }
+        op.optInTracking(properties: ["source": "settings"])
+        op.trackingQueue.sync {}
+        XCTAssertEqual(failedWrites, 2)
+        XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+
+        let retry = MobileTimePoint(epochMs: point.epochMs + 1_000, monotonicMs: point.monotonicMs + 1_000)
+        op.mobileForeground(at: retry)
+        op.trackingQueue.sync {}
+
+        let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(events.compactMap { $0["event"] as? String },
+                       ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start", "$opt_in"])
+        let sid = (events.first?["defaultProperties"] as? [String: Any])?["sid"] as? String
+        XCTAssertNotNil(sid)
+        XCTAssertTrue(events.allSatisfy {
+            ($0["defaultProperties"] as? [String: Any])?["sid"] as? String == sid
+        })
+        XCTAssertTrue(events.allSatisfy { $0["visitor_id"] as? String == op.visitorId })
+        XCTAssertEqual((events.last?["eventProperties"] as? [String: Any])?["source"] as? String, "settings")
+        XCTAssertTrue(op.mobileSession?.hasAcceptedFirstOpen ?? false)
+    }
+
+    func testActiveOptInRetriesFailedEventWriteWithoutDuplicatingIdentify() async {
+        let op = makeMobileInstance()
+        await op.initialize(options: OursPrivacyInitOptions(optedOutByDefault: true))
+        let point = mobilePoint()
+        op.captureMobileTime = { point }
+        op.mobileQueueNowMs = { point.epochMs + 1_000 }
+        op.mobilePendingRetryIntervalMs = 60_000
+        op.mobileForeground(at: point)
+        op.trackingQueue.sync {}
+
+        let persist = op.oursprivacyPersistence.persistenceWrite
+        var failedOptIn = false
+        op.oursprivacyPersistence.persistenceWrite = { data in
+            let blob = JSONHandler.deserializeData(data) as? [String: Any]
+            let names = (blob?["events"] as? [[String: Any]])?
+                .compactMap { $0["event"] as? String } ?? []
+            if names.last == "$opt_in" && !failedOptIn {
+                failedOptIn = true
+                return false
+            }
+            return persist(data)
+        }
+        op.optInTracking(userProperties: OursPrivacyUserProperties(externalId: "external-1"),
+                         properties: ["source": "settings"])
+        op.trackingQueue.sync {}
+        op.trackingQueue.sync {}
+
+        let beforeRetry = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertTrue(failedOptIn)
+        XCTAssertEqual(beforeRetry.compactMap { $0["event"] as? String },
+                       ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start", "$identify"])
+
+        op.oursprivacyPersistence.persistenceWrite = persist
+        op.mobileForeground(at: MobileTimePoint(epochMs: point.epochMs + 1_000, monotonicMs: point.monotonicMs + 1_000))
+        op.trackingQueue.sync {}
+
+        let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(events.compactMap { $0["event"] as? String },
+                       ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start", "$identify", "$opt_in"])
+        XCTAssertEqual(((events[3]["userProperties"] as? [String: Any])?["external_id"] as? String),
+                       "external-1")
+        XCTAssertEqual((events.last?["eventProperties"] as? [String: Any])?["source"] as? String, "settings")
+    }
+
+    func testActiveOptInRetriesOnTimerAfterStorageRecovers() async {
+        let op = makeMobileInstance()
+        await op.initialize(options: OursPrivacyInitOptions(optedOutByDefault: true))
+        let point = mobilePoint()
+        op.captureMobileTime = { point }
+        op.mobileQueueNowMs = { point.epochMs + 1_000 }
+        op.mobilePendingRetryIntervalMs = 25
+        op.mobileForeground(at: point)
+        op.trackingQueue.sync {}
+
+        let persist = op.oursprivacyPersistence.persistenceWrite
+        op.oursprivacyPersistence.persistenceWrite = { data in
+            let blob = JSONHandler.deserializeData(data) as? [String: Any]
+            let names = (blob?["events"] as? [[String: Any]])?
+                .compactMap { $0["event"] as? String } ?? []
+            return names.last == "$opt_in" ? false : persist(data)
+        }
+        op.optInTracking()
+        op.trackingQueue.sync {}
+        XCTAssertEqual(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            .compactMap { $0["event"] as? String },
+                       ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start"])
+
+        op.trackingQueue.sync {
+            op.oursprivacyPersistence.persistenceWrite = persist
+        }
+        for _ in 0 ..< 50 {
+            if op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).count == 4 { break }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            .compactMap { $0["event"] as? String },
+                       ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start", "$opt_in"])
+    }
+
+    func testActiveCallbackRetriesForegroundAfterPrivacyClearRecovers() async {
+        let op = makeMobileInstance()
+        await op.initialize()
+        let point = mobilePoint()
+        op.mobileQueueNowMs = { point.epochMs + 2_000 }
+        let persist = op.oursprivacyPersistence.persistenceWrite
+        op.oursprivacyPersistence.persistenceWrite = { _ in false }
+        XCTAssertFalse(op.oursprivacyPersistence.clearEntitiesForPrivacy())
+        XCTAssertTrue(op.oursprivacyPersistence.hasPendingPrivacyClear)
+
+        op.mobileForeground(at: point)
+        op.trackingQueue.sync {}
+        XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+        XCTAssertTrue(op.mobileSession?.pendingFacts.isEmpty ?? false)
+
+        op.oursprivacyPersistence.persistenceWrite = persist
+        let retry = MobileTimePoint(epochMs: point.epochMs + 1_000, monotonicMs: point.monotonicMs + 1_000)
+        op.mobileForeground(at: retry)
+        op.mobileForeground(at: retry)
+        op.trackingQueue.sync {}
+
+        let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertFalse(op.oursprivacyPersistence.hasPendingPrivacyClear)
+        XCTAssertEqual(events.compactMap { $0["event"] as? String },
+                       ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start"])
+        XCTAssertEqual((events.first?["defaultProperties"] as? [String: Any])?["mobile_occurred_at"] as? String,
+                       (events.last?["defaultProperties"] as? [String: Any])?["mobile_occurred_at"] as? String)
+    }
+
     func assertResumedTimerCheckpointsCumulativeEngagement(recreate: Bool, inactiveOnly: Bool = false) async {
         let name = "resumed-checkpoint-\(UUID().uuidString)"
         let makeInstance = { () -> OursPrivacy in

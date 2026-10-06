@@ -764,14 +764,14 @@ final class OursPrivacyTests: XCTestCase {
         XCTAssertFalse(op.hasOptedOutTracking())
     }
 
-    private func makeMobileInstance(name: String = "mobile-\(UUID().uuidString)") -> OursPrivacy {
+    func makeMobileInstance(name: String = "mobile-\(UUID().uuidString)") -> OursPrivacy {
         let op = OursPrivacy(token: name, trackAutomaticEvents: true)
         op.mobileSession = MobileSession(instanceName: name)
         op.mobileRuntimeEnabled = true
         return op
     }
 
-    private func mobilePoint(_ elapsed: Int64 = 0) -> MobileTimePoint {
+    func mobilePoint(_ elapsed: Int64 = 0) -> MobileTimePoint {
         let now = Int64(Date().timeIntervalSince1970 * 1_000)
         return MobileTimePoint(epochMs: now + elapsed, monotonicMs: elapsed)
     }
