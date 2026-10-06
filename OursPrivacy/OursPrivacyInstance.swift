@@ -75,6 +75,7 @@ private struct PersistedEventTransfer: @unchecked Sendable {
 private struct PendingTrackingItem {
     let event: InternalProperties
     let completion: (@Sendable () -> Void)?
+    let precedingFactIds: Set<String>
 }
 
 protocol AppLifecycle {
@@ -517,32 +518,51 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
     }
 
     private func queuePendingMobileFacts() {
-        defer { drainPendingTrackingItems() }
-        guard mobileRuntimeEnabled, !hasOptedOutTracking(),
-              !oursprivacyPersistence.hasPendingPrivacyClear, let mobileSession else { return }
-        let queued = oursprivacyPersistence.loadEntitiesInBatch(type: .events)
-        let queuedIds = Set(queued.compactMap { $0["distinct_id"] as? String })
-        mobileSession.acknowledgeQueuedFacts(queuedIds,
-                                             firstOpenQueueEvidence: oursprivacyPersistence.hasFirstOpenQueueEvidence)
+        guard !hasOptedOutTracking(), !oursprivacyPersistence.hasPendingPrivacyClear else { return }
+        let mobileSession = mobileRuntimeEnabled ? mobileSession : nil
+        if let mobileSession {
+            let queued = oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            let queuedIds = Set(queued.compactMap { $0["distinct_id"] as? String })
+            mobileSession.acknowledgeQueuedFacts(queuedIds,
+                                                 firstOpenQueueEvidence: oursprivacyPersistence.hasFirstOpenQueueEvidence)
+        }
         var retryDelayMs: Int64?
-        for fact in mobileSession.pendingFacts {
-            let now = mobileQueueNowMs()
-            if fact.occurredAtMs > now {
-                let delay = min(fact.occurredAtMs - now, Int64(max(1, mobilePendingRetryIntervalMs)))
-                retryDelayMs = min(retryDelayMs ?? delay, delay)
-                if fact.name == "$mobile_first_open" { break }
-                continue
-            }
-            let item = trackInstance.composeMobileFact(fact)
-            let saved = oursprivacyPersistence.saveEntity(item, type: .events,
-                                                            firstOpen: fact.name == "$mobile_first_open")
-            if saved {
-                mobileSession.acknowledgeQueuedFacts([fact.distinctId],
+        while true {
+            let precedingFactIds = pendingTrackingItems.first?.precedingFactIds
+            var failedWrite = false
+            for fact in mobileSession?.pendingFacts ?? [] {
+                if let precedingFactIds, !precedingFactIds.contains(fact.distinctId) { break }
+                let now = mobileQueueNowMs()
+                if fact.occurredAtMs > now {
+                    let delay = min(fact.occurredAtMs - now, Int64(max(1, mobilePendingRetryIntervalMs)))
+                    retryDelayMs = min(retryDelayMs ?? delay, delay)
+                    if fact.name == "$mobile_first_open" { break }
+                    continue
+                }
+                let item = trackInstance.composeMobileFact(fact)
+                guard oursprivacyPersistence.saveEntity(item, type: .events,
+                                                         firstOpen: fact.name == "$mobile_first_open") else {
+                    retryDelayMs = min(retryDelayMs ?? Int64.max, Int64(max(1, mobilePendingRetryIntervalMs)))
+                    failedWrite = true
+                    break
+                }
+                mobileSession?.acknowledgeQueuedFacts([fact.distinctId],
                     firstOpenQueueEvidence: oursprivacyPersistence.hasFirstOpenQueueEvidence)
-            } else {
-                let delay = Int64(max(1, mobilePendingRetryIntervalMs))
-                retryDelayMs = min(retryDelayMs ?? delay, delay)
+            }
+            if failedWrite { break }
+            guard let pending = pendingTrackingItems.first else { break }
+            let now = mobileQueueNowMs()
+            let duePriorFact = mobileSession?.pendingFacts.contains {
+                pending.precedingFactIds.contains($0.distinctId) && $0.occurredAtMs <= now
+            } ?? false
+            if duePriorFact { break }
+            guard oursprivacyPersistence.saveEntity(pending.event, type: .events) else {
+                retryDelayMs = min(retryDelayMs ?? Int64.max, Int64(max(1, mobilePendingRetryIntervalMs)))
                 break
+            }
+            pendingTrackingItems.removeFirst()
+            if let completion = pending.completion {
+                DispatchQueue.main.async(execute: completion)
             }
         }
         if let retryDelayMs {
@@ -553,26 +573,19 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
         }
     }
 
-    private func drainPendingTrackingItems() {
-        guard !pendingTrackingItems.isEmpty, !hasOptedOutTracking(),
-              !oursprivacyPersistence.hasPendingPrivacyClear else { return }
-        let now = mobileQueueNowMs()
-        let dueOpenPending = mobileSession?.pendingFacts.contains {
-            ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start"].contains($0.name) &&
-                $0.occurredAtMs <= now
-        } ?? false
-        guard !dueOpenPending else { return }
+    private func pendingTrackingItem(_ event: InternalProperties,
+                                     completion: (@Sendable () -> Void)? = nil) -> PendingTrackingItem {
+        PendingTrackingItem(event: event, completion: completion,
+                            precedingFactIds: Set(mobileSession?.pendingFacts.map(\.distinctId) ?? []))
+    }
 
-        while let pending = pendingTrackingItems.first {
-            guard oursprivacyPersistence.saveEntity(pending.event, type: .events) else {
-                scheduleMobilePendingRetry(after: max(1, mobilePendingRetryIntervalMs))
-                return
-            }
-            pendingTrackingItems.removeFirst()
-            if let completion = pending.completion {
+    private func discardPendingTrackingItems() {
+        for item in pendingTrackingItems {
+            if let completion = item.completion {
                 DispatchQueue.main.async(execute: completion)
             }
         }
+        pendingTrackingItems.removeAll()
     }
 
     private func scheduleMobilePendingRetry(after milliseconds: Int) {
@@ -872,9 +885,12 @@ extension OursPrivacy {
     private func enqueueIdentify(_ snapshot: PropertySnapshot, at point: MobileTimePoint,
                                  completion: (@Sendable () -> Void)?) {
         trackingQueue.async { [weak self, snapshot, completion] in
-            guard let self = self else { return }
-            guard !self.hasOptedOutTracking() else { return }
-            guard self.clearPrivacyQueueIfNeeded() else { return }
+            guard let self, !self.hasOptedOutTracking(), self.clearPrivacyQueueIfNeeded() else {
+                if let completion {
+                    DispatchQueue.main.async(execute: completion)
+                }
+                return
+            }
             let wasHeld = !self.pendingTrackingItems.isEmpty
             self.queuePendingMobileFacts()
             let context = self.currentEventContext(at: point)
@@ -886,7 +902,7 @@ extension OursPrivacy {
                     DispatchQueue.main.async(execute: completion)
                 }
             } else {
-                self.pendingTrackingItems.append(PendingTrackingItem(event: item, completion: completion))
+                self.pendingTrackingItems.append(self.pendingTrackingItem(item, completion: completion))
             }
             self.queuePendingMobileFacts()
         }
@@ -904,7 +920,7 @@ extension OursPrivacy {
             guard let self = self else { return }
             self.mobilePendingRetryTimer?.cancel()
             self.mobilePendingRetryTimer = nil
-            self.pendingTrackingItems.removeAll()
+            self.discardPendingTrackingItems()
             let nextVisitorId = self.newVisitorId()
             if self.mobileRuntimeEnabled, let mobileSession = self.mobileSession {
                 _ = mobileSession.rotate(to: nextVisitorId,
@@ -1179,7 +1195,7 @@ extension OursPrivacy {
             if !wasHeld && self.pendingTrackingItems.isEmpty {
                 self.oursprivacyPersistence.saveEntity(item, type: .events)
             } else {
-                self.pendingTrackingItems.append(PendingTrackingItem(event: item, completion: nil))
+                self.pendingTrackingItems.append(self.pendingTrackingItem(item))
             }
             self.queuePendingMobileFacts()
         }
@@ -1205,7 +1221,7 @@ extension OursPrivacy {
             self.mobileCheckpointTimer = nil
             self.mobilePendingRetryTimer?.cancel()
             self.mobilePendingRetryTimer = nil
-            self.pendingTrackingItems.removeAll()
+            self.discardPendingTrackingItems()
             self.readWriteLock.write {
                 self.optOutStatus = true
             }
@@ -1262,9 +1278,9 @@ extension OursPrivacy {
                                                              eventProperties: capturedProperties.decode(),
                                                              userProperties: nil, context: context)
             if let identify {
-                self.pendingTrackingItems.append(PendingTrackingItem(event: identify, completion: nil))
+                self.pendingTrackingItems.append(self.pendingTrackingItem(identify))
             }
-            self.pendingTrackingItems.append(PendingTrackingItem(event: event, completion: nil))
+            self.pendingTrackingItems.append(self.pendingTrackingItem(event))
             self.queuePendingMobileFacts()
         }
         if OursPrivacy.isiOSAppExtension() {

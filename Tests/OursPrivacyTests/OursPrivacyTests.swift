@@ -1170,6 +1170,7 @@ final class OursPrivacyTests: XCTestCase {
             if !op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty { break }
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
+        op.trackingQueue.sync {}
         let queued = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
         XCTAssertEqual(queued.first?["event"] as? String, "$mobile_first_open")
         XCTAssertEqual(queued.first?["distinct_id"] as? String, first?.distinctId)

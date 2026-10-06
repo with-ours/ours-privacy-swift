@@ -603,6 +603,195 @@ final class MobileSessionTests: XCTestCase {
 }
 
 extension OursPrivacyTests {
+    func heldActiveOptIn(failingWrites: Int = 2, withIdentify: Bool = false) async
+        -> (OursPrivacy, MobileTimePoint) {
+        let op = makeMobileInstance()
+        await op.initialize(options: OursPrivacyInitOptions(optedOutByDefault: true))
+        let point = MobileTimePoint(epochMs: 1_791_194_400_000, monotonicMs: 0)
+        op.captureMobileTime = { point }
+        op.mobileQueueNowMs = { point.epochMs + 20_000 }
+        op.mobilePendingRetryIntervalMs = 60_000
+        op.mobileForeground(at: point)
+        op.trackingQueue.sync {}
+        let persist = op.oursprivacyPersistence.persistenceWrite
+        var failures = 0
+        op.oursprivacyPersistence.persistenceWrite = { data in
+            if failures < failingWrites {
+                failures += 1
+                return false
+            }
+            return persist(data)
+        }
+        op.optInTracking(userProperties: withIdentify
+            ? OursPrivacyUserProperties(externalId: "external-1") : nil)
+        op.trackingQueue.sync {}
+        return (op, point)
+    }
+
+    func testHeldOptInPrecedesLaterScreenThenManualTrack() async {
+        let (op, point) = await heldActiveOptIn(failingWrites: 3, withIdentify: true)
+        op.trackScreen("Schedule")
+        op.track(event: "Blue")
+        op.trackingQueue.sync {}
+        op.mobilePause(at: MobileTimePoint(epochMs: point.epochMs + 1_000, monotonicMs: 1_000))
+        op.trackingQueue.sync {}
+
+        let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(events.compactMap { $0["event"] as? String },
+                       ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start",
+                        "$identify", "$opt_in", "$mobile_screen_view", "Blue", "$mobile_session_engagement"])
+        XCTAssertEqual((events[5]["eventProperties"] as? [String: Any])?["screen_name"] as? String, "Schedule")
+        XCTAssertEqual((events.last?["eventProperties"] as? [String: Any])?["screen_name"] as? String,
+                       "Schedule")
+        XCTAssertEqual((events.last?["eventProperties"] as? [String: Any])?["engagement_duration_ms"] as? Int64,
+                       1_000)
+        let sid = (events.first?["defaultProperties"] as? [String: Any])?["sid"] as? String
+        XCTAssertNotNil(sid)
+        XCTAssertTrue(events.allSatisfy {
+            ($0["defaultProperties"] as? [String: Any])?["sid"] as? String == sid
+        })
+        XCTAssertTrue(events.allSatisfy { $0["visitor_id"] as? String == op.visitorId })
+    }
+
+    func testHeldOptInPrecedesManualTrackThenLaterScreen() async {
+        let (op, point) = await heldActiveOptIn(failingWrites: 5)
+        op.track(event: "Blue")
+        op.trackScreen("Schedule")
+        op.trackingQueue.sync {}
+        op.mobileForeground(at: MobileTimePoint(epochMs: point.epochMs + 1_000, monotonicMs: 1_000))
+        op.trackingQueue.sync {}
+
+        let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(events.compactMap { $0["event"] as? String },
+                       ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start",
+                        "$opt_in", "Blue", "$mobile_screen_view"])
+        XCTAssertEqual((events.last?["eventProperties"] as? [String: Any])?["screen_name"] as? String,
+                       "Schedule")
+    }
+
+    func testLaterScreenRemainsDurablyPendingBehindHeldOptIn() async {
+        let (op, point) = await heldActiveOptIn(failingWrites: 20)
+        op.trackScreen("Schedule")
+        op.trackingQueue.sync {}
+        let restored = MobileSession(instanceName: op.name)
+        XCTAssertTrue(restored.pendingFacts.contains {
+            $0.name == "$mobile_screen_view" && $0.properties["screen_name"] as? String == "Schedule"
+        })
+        XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+
+        let persist = OursPrivacyPersistence(instanceName: op.name).persistenceWrite
+        op.oursprivacyPersistence.persistenceWrite = persist
+        op.mobileForeground(at: MobileTimePoint(epochMs: point.epochMs + 1_000, monotonicMs: 1_000))
+        op.trackingQueue.sync {}
+        let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(events.compactMap { $0["event"] as? String },
+                       ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start",
+                        "$opt_in", "$mobile_screen_view"])
+    }
+
+    func testForcedPauseEngagementFollowsHeldOptIn() async {
+        let (op, point) = await heldActiveOptIn()
+        op.mobilePause(at: MobileTimePoint(epochMs: point.epochMs + 1_000, monotonicMs: 1_000))
+        op.trackingQueue.sync {}
+        let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(events.compactMap { $0["event"] as? String },
+                       ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start",
+                        "$opt_in", "$mobile_session_engagement"])
+        XCTAssertEqual((events.last?["eventProperties"] as? [String: Any])?["engagement_duration_ms"] as? Int64,
+                       1_000)
+    }
+
+    func testBackgroundAndWarmOpenFollowHeldOptInWithoutDuplicateStart() async {
+        let (op, point) = await heldActiveOptIn(failingWrites: 3)
+        op.mobileBackground(at: MobileTimePoint(epochMs: point.epochMs + 1_000, monotonicMs: 1_000))
+        op.mobileForeground(at: MobileTimePoint(epochMs: point.epochMs + 2_000, monotonicMs: 2_000))
+        op.trackingQueue.sync {}
+        let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(events.compactMap { $0["event"] as? String },
+                       ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start",
+                        "$opt_in", "$mobile_session_engagement", "$mobile_app_open"])
+        XCTAssertEqual(events.filter { $0["event"] as? String == "$mobile_session_start" }.count, 1)
+        XCTAssertEqual(events.filter { $0["event"] as? String == "$mobile_app_open" }.count, 2)
+        let sid = (events.first?["defaultProperties"] as? [String: Any])?["sid"] as? String
+        XCTAssertNotNil(sid)
+        XCTAssertTrue(events.allSatisfy {
+            ($0["defaultProperties"] as? [String: Any])?["sid"] as? String == sid
+        })
+    }
+
+    func testCheckpointEngagementFollowsHeldOptIn() async {
+        let (op, point) = await heldActiveOptIn()
+        op.captureMobileTime = {
+            MobileTimePoint(epochMs: point.epochMs + 10_000, monotonicMs: 10_000)
+        }
+        _ = op.mobileSession?.checkpoint(at: op.captureMobileTime())
+        op.mobileForeground(at: MobileTimePoint(epochMs: point.epochMs + 10_000, monotonicMs: 10_000))
+        op.trackingQueue.sync {}
+        let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(events.compactMap { $0["event"] as? String },
+                       ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start",
+                        "$opt_in", "$mobile_session_engagement"])
+        XCTAssertEqual((events.last?["eventProperties"] as? [String: Any])?["engagement_duration_ms"] as? Int64,
+                       10_000)
+    }
+
+    func testHeldIdentifyCompletionRunsOnDiscardWithoutPriorEvent() async {
+        for reset in [false, true] {
+            let (op, point) = await heldActiveOptIn(failingWrites: 20)
+            let completed = expectation(description: "held identify discarded on \(reset ? "reset" : "opt-out")")
+            op.identify(OursPrivacyUserProperties(externalId: "external-1")) {
+                XCTAssertTrue(Thread.isMainThread)
+                completed.fulfill()
+            }
+            op.trackingQueue.sync {}
+            if reset { op.reset() } else { op.optOutTracking() }
+            op.trackingQueue.sync {}
+            await fulfillment(of: [completed], timeout: 2)
+            XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+
+            let persist = OursPrivacyPersistence(instanceName: op.name).persistenceWrite
+            op.oursprivacyPersistence.persistenceWrite = persist
+            if !reset { op.optInTracking() }
+            op.mobileForeground(at: MobileTimePoint(epochMs: point.epochMs + 1_000, monotonicMs: 1_000))
+            op.trackingQueue.sync {}
+            XCTAssertFalse(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+                .contains { $0["event"] as? String == "$identify" })
+        }
+    }
+
+    func testIdentifyQueuedBehindOptOutStillCompletes() async {
+        let op = makeMobileInstance()
+        await op.initialize()
+        let completed = expectation(description: "identify queued behind opt-out")
+        op.trackingQueue.suspend()
+        op.optOutTracking()
+        op.identify(OursPrivacyUserProperties(externalId: "external-1")) {
+            XCTAssertTrue(Thread.isMainThread)
+            completed.fulfill()
+        }
+        op.trackingQueue.resume()
+        op.trackingQueue.sync {}
+        await fulfillment(of: [completed], timeout: 2)
+        XCTAssertFalse(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            .contains { $0["event"] as? String == "$identify" })
+    }
+
+    func testIdentifyFailedPrivacyClearStillCompletes() async {
+        let op = makeMobileInstance()
+        await op.initialize()
+        op.oursprivacyPersistence.persistenceWrite = { _ in false }
+        XCTAssertFalse(op.oursprivacyPersistence.clearEntitiesForPrivacy())
+        let completed = expectation(description: "identify after failed privacy clear")
+        op.identify(OursPrivacyUserProperties(externalId: "external-1")) {
+            XCTAssertTrue(Thread.isMainThread)
+            completed.fulfill()
+        }
+        op.trackingQueue.sync {}
+        await fulfillment(of: [completed], timeout: 2)
+        XCTAssertFalse(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            .contains { $0["event"] as? String == "$identify" })
+    }
+
     func testManualTrackWaitsForHeldActiveOptInWithoutAnotherCallback() async {
         let op = makeMobileInstance()
         await op.initialize(options: OursPrivacyInitOptions(optedOutByDefault: true))
