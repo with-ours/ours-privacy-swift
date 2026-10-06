@@ -866,7 +866,7 @@ extension OursPrivacy {
     // MARK: - Deep links
 
     /// Parse a deep-link URL for marketing attribution and record a
-    /// `$deep_link_opened` event with the raw URL.
+    /// `$deep_link_opened` event without the raw URL.
     ///
     /// UTM parameters and ad-network click IDs are extracted and stored as
     /// store-level attribution defaults — every subsequent event sends them
@@ -902,8 +902,7 @@ extension OursPrivacy {
             attributionDefaultProperties = combined
         }
 
-        track(event: "$deep_link_opened",
-              properties: ["url": attribution.rawURL])
+        track(event: "$deep_link_opened", properties: nil)
     }
 }
 

@@ -67,6 +67,23 @@ private final class LockedMobileClock: @unchecked Sendable {
     }
 }
 
+private final class RecordingPrivacyLogger: OursPrivacyLogging {
+    private let lock = NSLock()
+    private var messages: [String] = []
+
+    func addMessage(message: OursPrivacyLogMessage) {
+        lock.lock()
+        messages.append(message.text)
+        lock.unlock()
+    }
+
+    var capturedText: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return messages.joined(separator: "\n")
+    }
+}
+
 final class OursPrivacyTests: XCTestCase {
 
     // MARK: - Endpoint / route invariants
@@ -539,6 +556,54 @@ final class OursPrivacyTests: XCTestCase {
         op.trackDeepLink("https://app.example.com/?ours_visitor_id=from-web-xyz")
         XCTAssertEqual(op.getVisitorId(), "from-web-xyz")
         XCTAssertTrue(op.isManuallySetId)
+    }
+
+    func testInitialDeepLinkRedactsRawURLFromPayloadAndDiagnostics() async throws {
+        let logger = RecordingPrivacyLogger()
+        OursPrivacyLogger.addLogging(logger)
+        let op = makeMobileInstance()
+        op.setLoggingEnabled(true)
+        defer { op.setLoggingEnabled(false) }
+
+        let url = "https://example.test/open?utm_source=campaign&fbclid=click-from-ad"
+            + "&ours_visitor_id=visitor-from-web&patient_email=secret&idfa=ad-device-secret"
+        op.mobileForeground(at: mobilePoint())
+        await op.initialize(options: OursPrivacyInitOptions(initialURL: url))
+        op.track(event: "appointment_booked", properties: ["appointment_id": "visit-1"])
+        op.trackingQueue.sync {}
+
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let opened = try XCTUnwrap(items.first { $0["event"] as? String == "$deep_link_opened" })
+        let defaults = try XCTUnwrap(opened["defaultProperties"] as? [String: Any])
+        XCTAssertEqual(opened["visitor_id"] as? String, "visitor-from-web")
+        XCTAssertTrue(op.isManuallySetId)
+        XCTAssertEqual(defaults["utm_source"] as? String, "campaign")
+        XCTAssertEqual(defaults["fbclid"] as? String, "click-from-ad")
+        XCTAssertTrue(opened["eventProperties"] is NSNull)
+        XCTAssertFalse(String(describing: opened).contains("https://example.test"))
+        XCTAssertFalse(String(describing: opened).contains("patient_email"))
+        XCTAssertFalse(String(describing: opened).contains("secret"))
+        XCTAssertNil(defaults["idfa"])
+
+        let booked = try XCTUnwrap(items.first { $0["event"] as? String == "appointment_booked" })
+        XCTAssertEqual(booked["visitor_id"] as? String, "visitor-from-web")
+        XCTAssertEqual((booked["defaultProperties"] as? [String: Any])?["utm_source"] as? String, "campaign")
+        XCTAssertEqual((booked["defaultProperties"] as? [String: Any])?["fbclid"] as? String, "click-from-ad")
+        XCTAssertFalse(String(describing: booked).contains("patient_email"))
+
+        let automatic = items.filter { ($0["event"] as? String)?.hasPrefix("$mobile_") == true }
+        XCTAssertEqual(automatic.count, 3)
+        for fact in automatic {
+            let factDefaults = try XCTUnwrap(fact["defaultProperties"] as? [String: Any])
+            XCTAssertNil(factDefaults["fbclid"])
+            XCTAssertNil(factDefaults["idfa"])
+            XCTAssertNil(factDefaults["patient_email"])
+            XCTAssertFalse(String(describing: fact).contains("secret"))
+        }
+        XCTAssertTrue(logger.capturedText.contains("Tracking $deep_link_opened"))
+        XCTAssertFalse(logger.capturedText.contains(url))
+        XCTAssertFalse(logger.capturedText.contains("patient_email"))
+        XCTAssertFalse(logger.capturedText.contains("secret"))
     }
 
     func testTrackDeepLinkRespectsOptOut() {

@@ -45,8 +45,10 @@ final class OursPrivacyiOSDemoUITests: XCTestCase {
         app.buttons["sendDeepLink"].tap()
         app.buttons["flush"].tap()
         let deepLink = try waitForEvent("$deep_link_opened", token: token, recorderURL: recorderURL)
-        let deepLinkURL = (deepLink["eventProperties"] as? [String: Any])?["url"] as? String
-        XCTAssertTrue(deepLinkURL?.contains("utm_source=demo") == true)
+        XCTAssertNil((deepLink["eventProperties"] as? [String: Any])?["url"])
+        XCTAssertEqual((deepLink["eventProperties"] as? [String: Any])?["app_section"] as? String, "demo")
+        XCTAssertFalse(String(describing: deepLink).contains("https://example.com"))
+        XCTAssertEqual((deepLink["defaultProperties"] as? [String: Any])?["utm_source"] as? String, "demo")
         XCTAssertEqual((deepLink["defaultProperties"] as? [String: Any])?["fbclid"] as? String, "abc123")
 
         let beforeOptOut = try events(token: token, recorderURL: recorderURL).count

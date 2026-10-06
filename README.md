@@ -56,6 +56,8 @@ The `identify`, `reset`, and `flush` completion closures are now `@Sendable`. If
 
 **Mobile instrumentation migration:** `trackAutomaticEvents: true` continues to enable lifecycle events, but no longer observes StoreKit or emits `$ae_iap` by itself. Apps that intentionally use the legacy purchase event must set `trackAutomaticPurchases: true` at construction or boot. Review product identifiers and prices before enabling collection. Add explicit `trackScreen` calls for app screens; the SDK does not infer every UIKit or SwiftUI navigation transition.
 
+**Deep-link migration:** `$deep_link_opened` keeps its event name but the SDK no longer adds `eventProperties.url`. Replace reports or integrations that read the full URL with the supported UTM and click-ID fields in `defaultProperties`. Do not copy the URL into custom properties. Use PHI-free event and screen names, attribution values, and visitor IDs; screen names should be fixed labels without route parameters or patient details.
+
 ### 2. Initialize
 
 ```swift
@@ -468,9 +470,11 @@ op.setVisitorId("550e8400-e29b-41d4-a716-446655440000")
 
 #### `op.trackDeepLink(_:)`
 
-Parse a deep link URL for marketing attribution data and fire a `$deep_link_opened` event. Extracts UTM parameters, ad network click IDs, and `ours_visitor_id` for cross-platform identity stitching.
+Parse a deep link URL for marketing attribution data and fire a `$deep_link_opened` event. The SDK does not add the raw URL to event properties or its own diagnostics. It extracts only supported UTM parameters, ad network click IDs, and `ours_visitor_id` for cross-platform identity stitching; other query parameters are ignored.
 
 Parsed attribution params are merged into `defaultProperties`, so they appear on all subsequent `track()` calls. Calling `trackDeepLink` again **replaces** the prior attribution rather than merging, so stale UTM keys don't leak into events triggered by a later link.
+
+Keep attribution values and `ours_visitor_id` free of PHI. The SDK forwards supported values as supplied by the app, so avoid patient details in campaign names, click IDs, and other attribution values.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
