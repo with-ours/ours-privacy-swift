@@ -20,6 +20,32 @@ private final class RecordingFlushRequest: FlushRequest, @unchecked Sendable {
     }
 }
 
+private final class HeldFirstFlushRequest: FlushRequest, @unchecked Sendable {
+    let firstStarted = DispatchSemaphore(value: 0)
+    let releaseFirst = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var bodies: [String] = []
+
+    override func sendRequest(_ requestData: String, type: FlushType,
+                              headers: [String: String], queryItems: [URLQueryItem] = []) -> Bool {
+        lock.lock()
+        bodies.append(requestData)
+        let isFirst = bodies.count == 1
+        lock.unlock()
+        if isFirst {
+            firstStarted.signal()
+            _ = releaseFirst.wait(timeout: .now() + 5)
+        }
+        return true
+    }
+
+    var sentBodies: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return bodies
+    }
+}
+
 private final class LockedMobileClock: @unchecked Sendable {
     private let lock = NSLock()
     private var epochMs: Int64
@@ -1076,6 +1102,133 @@ final class OursPrivacyTests: XCTestCase {
         op.flushQueue(old, type: .events)
         op.flushQueue(after, type: .events)
         XCTAssertFalse(request.sentBodies.joined().contains("before-reset"))
+    }
+
+    func testOptOutStopsLaterBatchesAfterFirstRequestStarts() {
+        let op = makeInstance()
+        op.flushBatchSize = 1
+        op.track(event: "old-first")
+        op.track(event: "old-second")
+        op.trackingQueue.sync {}
+        let request = HeldFirstFlushRequest(serverURL: op.serverURL)
+        op.flushInstance.flushRequest = request
+
+        op.flush(performFullFlush: true)
+        XCTAssertEqual(request.firstStarted.wait(timeout: .now() + 2), .success)
+        op.optOutTracking()
+        op.trackingQueue.sync {}
+        request.releaseFirst.signal()
+        op.networkQueue.sync {}
+        op.trackingQueue.sync {}
+
+        XCTAssertEqual(request.sentBodies.count, 1)
+        XCTAssertFalse(request.sentBodies.joined().contains("old-second"))
+    }
+
+    func testResetStopsLaterBatchesAndOldAckCannotDeleteReusedRow() {
+        let op = makeInstance()
+        op.flushBatchSize = 1
+        op.track(event: "old-first", properties: ["$distinct_id": "reused"])
+        op.track(event: "old-second")
+        op.trackingQueue.sync {}
+        let oldId = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).first?["id"] as? Int32
+        let request = HeldFirstFlushRequest(serverURL: op.serverURL)
+        op.flushInstance.flushRequest = request
+
+        op.flush(performFullFlush: true)
+        XCTAssertEqual(request.firstStarted.wait(timeout: .now() + 2), .success)
+        op.reset()
+        op.trackingQueue.sync {}
+        op.track(event: "replacement", properties: ["$distinct_id": "reused"])
+        op.trackingQueue.sync {}
+        let replacement = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(replacement.first?["id"] as? Int32, oldId)
+        XCTAssertEqual(replacement.first?["distinct_id"] as? String, "reused")
+
+        request.releaseFirst.signal()
+        op.networkQueue.sync {}
+        op.trackingQueue.sync {}
+
+        XCTAssertEqual(request.sentBodies.count, 1)
+        XCTAssertFalse(request.sentBodies.joined().contains("old-second"))
+        XCTAssertEqual(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            .first?["event"] as? String, "replacement")
+    }
+
+    func testResetRejectsCapturedPayloadWithReusedDistinctAndRowId() {
+        let op = makeInstance()
+        op.track(event: "old-private", properties: ["$distinct_id": "reused"])
+        op.trackingQueue.sync {}
+        let captured = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let oldId = captured.first?["id"] as? Int32
+        let request = RecordingFlushRequest(serverURL: op.serverURL)
+        op.flushInstance.flushRequest = request
+
+        op.reset()
+        op.trackingQueue.sync {}
+        op.track(event: "replacement", properties: ["$distinct_id": "reused"])
+        op.trackingQueue.sync {}
+        let replacement = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(replacement.first?["id"] as? Int32, oldId)
+        op.flushQueue(captured, type: .events)
+        op.trackingQueue.sync {}
+
+        XCTAssertTrue(request.sentBodies.isEmpty)
+        XCTAssertEqual(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            .first?["event"] as? String, "replacement")
+    }
+
+    func testFlushNeverSendsLocalRowIdentity() {
+        let op = makeInstance()
+        var event = makeEntity("manual")
+        event["op_local_row_id"] = "local-secret"
+        XCTAssertTrue(op.oursprivacyPersistence.saveEntity(event, type: .events))
+        let request = RecordingFlushRequest(serverURL: op.serverURL)
+        op.flushInstance.flushRequest = request
+
+        op.flushQueue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events), type: .events)
+        XCTAssertEqual(request.sentBodies.count, 1)
+        XCTAssertFalse(request.sentBodies.joined().contains("op_local_row_id"))
+        XCTAssertFalse(request.sentBodies.joined().contains("local-secret"))
+    }
+
+    func testLocalRowIdentitySurvivesQueueRestart() {
+        let name = "row-restart-\(UUID().uuidString)"
+        let original = OursPrivacyPersistence(instanceName: name)
+        XCTAssertTrue(original.saveEntity(makeEntity("persisted"), type: .events))
+        let before = original.loadEntitiesInBatch(type: .events).first?["op_local_row_id"] as? String
+        let restarted = OursPrivacyPersistence(instanceName: name)
+        let after = restarted.loadEntitiesInBatch(type: .events).first?["op_local_row_id"] as? String
+        XCTAssertNotNil(before)
+        XCTAssertEqual(after, before)
+        OursPrivacyPersistence.deleteUserDefaultsData(instanceName: name)
+    }
+
+    func testFailedClearStillAppliesBackgroundBeforeNextForeground() async {
+        let op = makeMobileInstance()
+        await op.initialize()
+        let origin = Int64(Date().timeIntervalSince1970 * 1_000)
+        op.mobileQueueNowMs = { origin + 80_000 }
+        op.mobileForeground(at: MobileTimePoint(epochMs: origin, monotonicMs: 0))
+        op.trackingQueue.sync {}
+        let persist = op.oursprivacyPersistence.persistenceWrite
+        op.oursprivacyPersistence.persistenceWrite = { _ in false }
+        op.captureMobileTime = { MobileTimePoint(epochMs: origin + 5_000, monotonicMs: 5_000) }
+        op.reset()
+        op.trackingQueue.sync {}
+        op.mobileBackground(at: MobileTimePoint(epochMs: origin + 10_000, monotonicMs: 10_000))
+        op.trackingQueue.sync {}
+        XCTAssertTrue(op.oursprivacyPersistence.hasPendingPrivacyClear)
+
+        op.oursprivacyPersistence.persistenceWrite = persist
+        op.mobileForeground(at: MobileTimePoint(epochMs: origin + 60_000, monotonicMs: 60_000))
+        op.mobileBackground(at: MobileTimePoint(epochMs: origin + 70_000, monotonicMs: 70_000))
+        op.trackingQueue.sync {}
+        let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let durations = events.filter { $0["event"] as? String == "$mobile_session_engagement" }
+            .compactMap { ($0["eventProperties"] as? [String: Any])?["engagement_duration_ms"] as? Int64 }
+        XCTAssertEqual(durations, [5_000, 10_000])
+        XCTAssertEqual(events.filter { $0["event"] as? String == "$mobile_app_open" }.count, 1)
     }
 
     func testFailedPrivacyClearRecoversOnRestartAndPreservesFirstOpenEvidence() {

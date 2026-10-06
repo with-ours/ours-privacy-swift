@@ -572,9 +572,9 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
                 self.deferredMobileForeground = nil
                 return
             }
-            guard !self.hasOptedOutTracking(), self.clearPrivacyQueueIfNeeded(),
-                  let mobileSession = self.mobileSession else { return }
+            guard !self.hasOptedOutTracking(), let mobileSession = self.mobileSession else { return }
             _ = mobileSession.background(at: point)
+            guard self.clearPrivacyQueueIfNeeded() else { return }
             self.queuePendingMobileFacts()
         }
     }
@@ -936,23 +936,21 @@ extension OursPrivacy {
         if hasOptedOutTracking() || oursprivacyPersistence.hasPendingPrivacyClear {
             return
         }
-        let activeIds = Set(oursprivacyPersistence.loadEntitiesInBatch(type: .events)
-            .compactMap { $0["distinct_id"] as? String })
-        let current = queue.filter {
-            guard let distinctId = $0["distinct_id"] as? String else { return false }
-            return activeIds.contains(distinctId)
-        }
-        guard !current.isEmpty else { return }
+        guard !queue.isEmpty else { return }
         let proxyServerResource = proxyServerDelegate?.oursprivacyResourceForProxyServer(name)
         let headers: [String: String] = proxyServerResource?.headers ?? [:]
         let queryItems = proxyServerResource?.queryItems ?? []
-        flushInstance.flushQueue(current, type: type, headers: headers, queryItems: queryItems)
+        flushInstance.flushQueue(queue, type: type, headers: headers, queryItems: queryItems)
     }
 
-    func flushSuccess(type: FlushType, ids: [Int32]) {
+    func canFlushBatch(type: FlushType, rows: Queue) -> Bool {
+        type == .events && !hasOptedOutTracking() && oursprivacyPersistence.containsFlushRows(rows)
+    }
+
+    func flushSuccess(type: FlushType, rowIDs: [String]) {
         trackingQueue.async { [weak self] in
             guard let self = self else { return }
-            self.oursprivacyPersistence.removeEntitiesInBatch(type: .events, ids: ids)
+            self.oursprivacyPersistence.removeFlushedRows(rowIDs, type: .events)
         }
     }
 

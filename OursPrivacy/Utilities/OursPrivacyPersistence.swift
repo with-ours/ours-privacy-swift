@@ -51,6 +51,7 @@ struct OursPrivacyUserDefaultsKeys {
 /// separately under their own ``UserDefaults`` keys.
 class OursPrivacyPersistence {
 
+    static let localRowIDKey = "op_local_row_id"
     let instanceName: String
 
     private let queueLock = ReadWriteLock(label: "com.oursprivacy.persistence.queue")
@@ -93,6 +94,7 @@ class OursPrivacyPersistence {
         queueLock.write {
             var item = entity
             item["id"] = nextId
+            item[Self.localRowIDKey] = UUID().uuidString
             let proposal = inMemoryQueue + [item]
             if persistQueueToDefaults(proposal, firstOpenAccepted: firstOpenQueueEvidence || firstOpen) {
                 inMemoryQueue = proposal
@@ -134,6 +136,34 @@ class OursPrivacyPersistence {
                     return false
                 }
                 return toRemove.contains(id)
+            }
+            if persistQueueToDefaults(proposal, firstOpenAccepted: firstOpenQueueEvidence) {
+                inMemoryQueue = proposal
+            }
+        }
+    }
+
+    func containsFlushRows(_ rows: Queue) -> Bool {
+        var current = false
+        queueLock.read {
+            guard !privacyClearPending, !rows.isEmpty else { return }
+            let liveIDs = Set(inMemoryQueue.compactMap { $0[Self.localRowIDKey] as? String })
+            current = rows.allSatisfy { row in
+                guard let id = row[Self.localRowIDKey] as? String else { return false }
+                return liveIDs.contains(id)
+            }
+        }
+        return current
+    }
+
+    func removeFlushedRows(_ rowIDs: [String], type: PersistenceType) {
+        guard type == .events, !rowIDs.isEmpty else { return }
+        let toRemove = Set(rowIDs)
+        queueLock.write {
+            guard !privacyClearPending else { return }
+            let proposal = inMemoryQueue.filter { row in
+                guard let id = row[Self.localRowIDKey] as? String else { return true }
+                return !toRemove.contains(id)
             }
             if persistQueueToDefaults(proposal, firstOpenAccepted: firstOpenQueueEvidence) {
                 inMemoryQueue = proposal
@@ -213,11 +243,22 @@ class OursPrivacyPersistence {
             return
         }
 
+        var seenIDs = Set<String>()
+        let hydrated = array.map { row -> InternalProperties in
+            var item = row
+            if let id = item[Self.localRowIDKey] as? String, !id.isEmpty, seenIDs.insert(id).inserted {
+                return item
+            }
+            let id = UUID().uuidString
+            item[Self.localRowIDKey] = id
+            seenIDs.insert(id)
+            return item
+        }
         queueLock.write {
-            inMemoryQueue = array
+            inMemoryQueue = hydrated
             // Rebuild the id counter so newly appended items don't collide
             // with anything we just hydrated.
-            let maxId = array.compactMap {
+            let maxId = hydrated.compactMap {
                 ($0["id"] as? Int32) ?? ($0["id"] as? NSNumber)?.int32Value
             }.max() ?? 0
             nextId = maxId &+ 1
