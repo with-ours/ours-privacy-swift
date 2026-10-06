@@ -791,6 +791,112 @@ final class OursPrivacyTests: XCTestCase {
         XCTAssertEqual((items[1]["defaultProperties"] as? [String: Any])?["mobile_platform"] as? String, "ios")
     }
 
+    func testTrackScreenQueuesViewOnceAndAttributesPreviousEngagement() async {
+        let op = makeMobileInstance()
+        let clock = LockedMobileClock(mobilePoint().epochMs)
+        op.captureMobileTime = {
+            MobileTimePoint(epochMs: clock.now(), monotonicMs: clock.now())
+        }
+        op.mobileQueueNowMs = { clock.now() }
+        await op.initialize()
+        op.mobileForeground(at: MobileTimePoint(epochMs: clock.now(), monotonicMs: clock.now()))
+        op.trackingQueue.sync {}
+
+        op.trackScreen("Schedule")
+        op.trackScreen("Schedule")
+        clock.set(clock.now() + 10_000)
+        op.trackScreen("Booking")
+        op.trackingQueue.sync {}
+
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let screens = items.filter { $0["event"] as? String == "$mobile_screen_view" }
+        XCTAssertEqual(screens.count, 2)
+        guard screens.count == 2 else { return }
+        XCTAssertEqual((screens[0]["eventProperties"] as? [String: Any])?["screen_name"] as? String,
+                       "Schedule")
+        XCTAssertEqual((screens[1]["eventProperties"] as? [String: Any])?["screen_name"] as? String,
+                       "Booking")
+        let engagement = items.first { $0["event"] as? String == "$mobile_session_engagement" }
+        XCTAssertEqual((engagement?["eventProperties"] as? [String: Any])?["screen_name"] as? String,
+                       "Schedule")
+        XCTAssertEqual((engagement?["eventProperties"] as? [String: Any])?["engagement_duration_ms"] as? Int64,
+                       10_000)
+        XCTAssertEqual((screens[0]["defaultProperties"] as? [String: Any])?["sid"] as? String,
+                       (screens[1]["defaultProperties"] as? [String: Any])?["sid"] as? String)
+    }
+
+    func testTrackScreenRejectsUnstableLabels() async {
+        let op = makeMobileInstance()
+        await op.initialize()
+        let invalid = ["", " Schedule", "Schedule ", "https://example.test/route",
+                       "Schedule/Patient", "Patiént", "Schedule\n", String(repeating: "A", count: 81)]
+        for label in invalid {
+            op.trackScreen(label)
+        }
+        op.trackScreen(String(repeating: "A", count: 80))
+        op.trackingQueue.sync {}
+
+        let screens = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            .filter { $0["event"] as? String == "$mobile_screen_view" }
+        XCTAssertEqual(screens.count, 1)
+        XCTAssertEqual((screens[0]["eventProperties"] as? [String: Any])?["screen_name"] as? String,
+                       String(repeating: "A", count: 80))
+    }
+
+    func testManualScreenWorksWithAutomaticLifecycleOffAndFullOptOutSuppresses() async {
+        let op = makeMobileInstance()
+        op.trackAutomaticEventsEnabled = false
+        await op.initialize()
+        op.trackScreen("Schedule")
+        op.trackingQueue.sync {}
+        let before = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(before.map { $0["event"] as? String }, ["$mobile_screen_view"])
+        XCTAssertNotNil((before[0]["defaultProperties"] as? [String: Any])?["sid"] as? String)
+
+        op.optOutTracking()
+        op.trackingQueue.sync {}
+        op.trackScreen("Booking")
+        op.trackingQueue.sync {}
+        XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+    }
+
+    func testAutomaticPurchaseOptionDefaultsOffAndOverridesLifecycle() async {
+        let defaultOff = OursPrivacy(token: "purchases-\(UUID().uuidString)", trackAutomaticEvents: true)
+        XCTAssertFalse(defaultOff.trackAutomaticPurchasesEnabled)
+        await defaultOff.initialize()
+        defaultOff.track(event: "$ae_iap", properties: ["$ae_iap_name": "plan"])
+        defaultOff.trackingQueue.sync {}
+        XCTAssertTrue(defaultOff.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+
+        let optedIn = OursPrivacy(token: "purchases-\(UUID().uuidString)",
+                                  trackAutomaticEvents: false, trackAutomaticPurchases: true)
+        await optedIn.initialize()
+        optedIn.track(event: "$ae_iap", properties: ["$ae_iap_price": "12.99",
+                                                     "$ae_iap_quantity": 1,
+                                                     "$ae_iap_name": "plan"])
+        optedIn.trackingQueue.sync {}
+        let items = optedIn.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items[0]["event"] as? String, "$ae_iap")
+        XCTAssertEqual((items[0]["eventProperties"] as? [String: Any])?["$ae_iap_price"] as? String,
+                       "12.99")
+        XCTAssertEqual((items[0]["eventProperties"] as? [String: Any])?["$ae_iap_quantity"] as? Int, 1)
+        XCTAssertEqual((items[0]["eventProperties"] as? [String: Any])?["$ae_iap_name"] as? String,
+                       "plan")
+        XCTAssertEqual(optedIn.oursprivacyPersistence.loadEntitiesInBatch(
+            type: .events, excludeAutomaticEvents: true, excludeAutomaticPurchases: false
+        ).count, 1)
+    }
+
+    func testPurchaseOptionAtInitializeCanEnablePurchaseWithoutLifecycle() async {
+        let op = OursPrivacy(token: "purchases-\(UUID().uuidString)", trackAutomaticEvents: false)
+        await op.initialize(options: OursPrivacyInitOptions(trackAutomaticPurchases: true))
+        XCTAssertTrue(op.trackAutomaticPurchasesEnabled)
+        op.track(event: "$ae_iap", properties: ["$ae_iap_name": "plan"])
+        op.trackingQueue.sync {}
+        XCTAssertEqual(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).count, 1)
+    }
+
     func testAcceptedFirstOpenSurvivesQueueRemovalAndOptOutRestart() async {
         let name = "mobile-\(UUID().uuidString)"
         let first = makeMobileInstance(name: name)

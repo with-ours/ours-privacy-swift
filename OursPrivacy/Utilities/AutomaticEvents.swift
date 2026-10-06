@@ -50,6 +50,7 @@ class AutomaticEvents: NSObject, SKPaymentTransactionObserver, SKProductsRequest
     var sessionLength: TimeInterval = 0
     var sessionStartTime: TimeInterval = Date().timeIntervalSince1970
     var hasAddedObserver = false
+    var hasAddedPurchaseObserver = false
 
     let awaitingTransactionsWriteLock = DispatchQueue(label: "com.oursprivacy.awaiting_transactions_writeLock",
                                                        qos: .userInitiated,
@@ -98,7 +99,18 @@ class AutomaticEvents: NSObject, SKPaymentTransactionObserver, SKProductsRequest
         }
 
         registerLifecycleListeners()
+    }
+
+    func registerPurchaseObserver() {
+        guard !hasAddedPurchaseObserver else { return }
+        hasAddedPurchaseObserver = true
         SKPaymentQueue.default().add(self)
+    }
+
+    func unregisterPurchaseObserver() {
+        guard hasAddedPurchaseObserver else { return }
+        SKPaymentQueue.default().remove(self)
+        hasAddedPurchaseObserver = false
     }
 
     @objc func appWillResignActive(_ notification: Notification) {
@@ -120,6 +132,7 @@ class AutomaticEvents: NSObject, SKPaymentTransactionObserver, SKProductsRequest
     }
 
     func paymentQueue(_ queue: SKPaymentQueue, updatedTransactions transactions: [SKPaymentTransaction]) {
+        guard hasAddedPurchaseObserver else { return }
         let purchased = transactions.compactMap { transaction -> (String, Int)? in
             guard transaction.transactionState == .purchased else { return nil }
             return (transaction.payment.productIdentifier, transaction.payment.quantity)
@@ -142,15 +155,20 @@ class AutomaticEvents: NSObject, SKPaymentTransactionObserver, SKProductsRequest
         return round(num * 10.0) / 10.0
     }
 
+    func emitPurchasedProduct(identifier: String, quantity: Int, price: String) {
+        guard hasAddedPurchaseObserver else { return }
+        delegate?.track(event: "$ae_iap", properties: ["$ae_iap_price": price,
+                                                       "$ae_iap_quantity": quantity,
+                                                       "$ae_iap_name": identifier], userProperties: nil)
+    }
+
     func productsRequest(_ request: SKProductsRequest, didReceive response: SKProductsResponse) {
         let requestID = ObjectIdentifier(request)
         let products = response.products.map { ($0.productIdentifier, "\($0.price)") }
         awaitingTransactionsWriteLock.async { [self] in
             for (identifier, price) in products {
                 if let quantity = awaitingTransactions[identifier] {
-                    delegate?.track(event: "$ae_iap", properties: ["$ae_iap_price": price,
-                                                                   "$ae_iap_quantity": quantity,
-                                                                   "$ae_iap_name": identifier], userProperties: nil)
+                    emitPurchasedProduct(identifier: identifier, quantity: quantity, price: price)
                     awaitingTransactions.removeValue(forKey: identifier)
                 }
             }

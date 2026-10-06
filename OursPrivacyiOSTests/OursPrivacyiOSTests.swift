@@ -100,6 +100,75 @@ struct OursPrivacyiOSTests {
         #expect((booked?["eventProperties"] as? [String: Any])?["caller_field"] as? String == "private")
     }
 
+    @Test @MainActor func iosRuntimeTracksExplicitScreenWithAutomaticLifecycleOff() async {
+        let op = OursPrivacy(token: "ios-screen-\(UUID().uuidString)", trackAutomaticEvents: false)
+        #expect(op.mobileRuntimeEnabled)
+        await op.initialize()
+        op.trackScreen("Schedule")
+        op.trackScreen("Schedule")
+        op.trackingQueue.sync {}
+
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        #expect(items.map { $0["event"] as? String } == ["$mobile_screen_view"])
+        #expect((items[0]["eventProperties"] as? [String: Any])?["screen_name"] as? String == "Schedule")
+        #expect((items[0]["defaultProperties"] as? [String: Any])?["mobile_platform"] as? String == "ios")
+        #expect((items[0]["defaultProperties"] as? [String: Any])?["sid"] is String)
+
+        op.optOutTracking()
+        op.trackingQueue.sync {}
+        op.trackScreen("Booking")
+        op.trackingQueue.sync {}
+        #expect(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+    }
+
+    @Test @MainActor func iosStoreKitRegistrationRequiresSeparatePurchaseOptIn() async {
+        let lifecycle = OursPrivacy(token: "ios-purchase-\(UUID().uuidString)",
+                                     trackAutomaticEvents: true)
+        await lifecycle.initialize()
+        #expect(lifecycle.automaticEvents.hasAddedPurchaseObserver == false)
+        lifecycle.track(event: "$ae_iap", properties: ["$ae_iap_name": "plan"])
+        lifecycle.trackingQueue.sync {}
+        #expect(lifecycle.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            .allSatisfy { $0["event"] as? String != "$ae_iap" })
+
+        let purchases = OursPrivacy(token: "ios-purchase-\(UUID().uuidString)",
+                                     trackAutomaticEvents: false, trackAutomaticPurchases: true)
+        await purchases.initialize()
+        #expect(purchases.automaticEvents.hasAddedPurchaseObserver)
+        #expect(purchases.automaticEvents.hasAddedObserver == false)
+        purchases.automaticEvents.emitPurchasedProduct(identifier: "plan", quantity: 1, price: "12.99")
+        purchases.trackingQueue.sync {}
+        let iap = purchases.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            .first { $0["event"] as? String == "$ae_iap" }
+        #expect((iap?["eventProperties"] as? [String: Any])?["$ae_iap_price"] as? String == "12.99")
+        #expect((iap?["eventProperties"] as? [String: Any])?["$ae_iap_quantity"] as? Int == 1)
+        #expect((iap?["eventProperties"] as? [String: Any])?["$ae_iap_name"] as? String == "plan")
+
+        purchases.optOutTracking()
+        purchases.trackingQueue.sync {}
+        purchases.automaticEvents.delegate?.track(event: "$ae_iap",
+                                                   properties: ["$ae_iap_name": "plan"],
+                                                   userProperties: nil)
+        purchases.trackingQueue.sync {}
+        #expect(purchases.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+    }
+
+    @Test @MainActor func iosPurchaseOptInAfterOptedOutLaunchEmitsLegacyEvent() async {
+        let op = OursPrivacy(token: "ios-opt-in-\(UUID().uuidString)", trackAutomaticEvents: false)
+        await op.initialize(options: OursPrivacyInitOptions(
+            optedOutByDefault: true, trackAutomaticPurchases: true))
+        #expect(op.hasOptedOutTracking())
+        #expect(op.automaticEvents.hasAddedPurchaseObserver == false)
+
+        op.optInTracking()
+        op.trackingQueue.sync {}
+        #expect(op.automaticEvents.hasAddedPurchaseObserver)
+        op.automaticEvents.emitPurchasedProduct(identifier: "plan", quantity: 1, price: "12.99")
+        op.trackingQueue.sync {}
+        let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        #expect(events.contains { $0["event"] as? String == "$ae_iap" })
+    }
+
     @Test @MainActor func foregroundTimerEmitsRepeatedEngagementWithoutBackground() async {
         let op = OursPrivacy(token: "ios-checkpoint-\(UUID().uuidString)", trackAutomaticEvents: true)
         let clock = LockedTestMobileTime(MobileTimePoint.capture())

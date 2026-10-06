@@ -44,8 +44,9 @@ class Track {
         } else {
             OursPrivacyLogger.info(message: "oursprivacy track called with empty event parameter. using 'op_event'")
         }
-        if !(oursprivacyInstance?.trackAutomaticEventsEnabled ?? false) && name.hasPrefix("$ae_") {
-            // Caller has automatic events disabled — drop the AE event silently.
+        if name == "$ae_iap" {
+            guard oursprivacyInstance?.trackAutomaticPurchasesEnabled == true else { return [:] }
+        } else if name.hasPrefix("$ae_") && !(oursprivacyInstance?.trackAutomaticEventsEnabled ?? false) {
             return [:]
         }
         assertPropertyTypes(eventProperties)

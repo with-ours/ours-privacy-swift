@@ -19,6 +19,7 @@ Privacy-first analytics for iOS, tvOS, macOS, and watchOS, written in Swift.
 - [API Reference](#api-reference)
   - [Initialization](#initialization)
   - [Core Tracking](#core-tracking)
+  - [Mobile Screens and Purchases](#mobile-screens-and-purchases)
   - [Default Properties](#default-properties)
   - [Configuration](#configuration)
   - [Identity](#identity)
@@ -52,6 +53,8 @@ Then add `"OursPrivacyKit"` to your target's dependencies.
 Version 3.0 requires Xcode with Swift 6 support and raises the deployment targets to iOS 15, tvOS 15, macOS 12, and watchOS 8. Apps with lower deployment targets should remain on 2.x. The package uses Swift 5 language mode with complete concurrency checking.
 
 The `identify`, `reset`, and `flush` completion closures are now `@Sendable`. If a completion captures mutable or main-actor state, move that work onto the appropriate actor or capture a thread-safe value. Event payloads now report `defaultProperties.version` as `swift@3.0.0`; update any code that compares the old value. CocoaPods consumers must move to Swift Package Manager for 3.0.
+
+**Mobile instrumentation migration:** `trackAutomaticEvents: true` continues to enable lifecycle events, but no longer observes StoreKit or emits `$ae_iap` by itself. Apps that intentionally use the legacy purchase event must set `trackAutomaticPurchases: true` at construction or boot. Review product identifiers and prices before enabling collection. Add explicit `trackScreen` calls for app screens; the SDK does not infer every UIKit or SwiftUI navigation transition.
 
 ### 2. Initialize
 
@@ -130,14 +133,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 ### Initialization
 
-#### `OursPrivacy(token:trackAutomaticEvents:)`
+#### `OursPrivacy(token:trackAutomaticEvents:trackAutomaticPurchases:)`
 
 Construct an instance. Hold a single `OursPrivacy` for the lifetime of your app.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `token` | `String` | Yes | Your project token |
-| `trackAutomaticEvents` | `Bool` | Yes | Record session and first-launch events automatically (ignored on watchOS / macOS) |
+| `trackAutomaticEvents` | `Bool` | Yes | Record iOS lifecycle, engagement, and update events automatically (ignored on watchOS / macOS) |
+| `trackAutomaticPurchases` | `Bool` | No | Observe StoreKit purchases and emit legacy `$ae_iap`; defaults to `false`, independent of lifecycle tracking |
 
 ```swift
 let op = OursPrivacy(token: "YOUR_API_TOKEN", trackAutomaticEvents: true)
@@ -160,6 +164,7 @@ Apply boot-time options and start the flush timer. Call once, immediately after 
 | Field | Type | Description |
 |-------|------|-------------|
 | `optedOutByDefault` | `Bool` | If `true`, tracking starts opted out (default: `false`) |
+| `trackAutomaticPurchases` | `Bool?` | Override the constructor's purchase choice at boot; omitted keeps it unchanged (default: `false`) |
 | `visitorId` | `String` | Pre-set the visitor ID; sets `is_manually_set_id: true` on all events |
 | `defaultEventProperties` | `[String: OursPrivacyType]` | Properties merged into `eventProperties` on every `track()` call |
 | `defaultUserCustomProperties` | `[String: OursPrivacyType]` | Properties merged into `userProperties.custom_properties` on every event |
@@ -202,6 +207,42 @@ Track an event with optional properties.
 ```swift
 op.track(event: "Page View", properties: ["page": "/home", "referrer": "google"])
 ```
+
+---
+
+### Mobile Screens and Purchases
+
+#### `op.trackScreen(_:)`
+
+Call on each actual screen transition, including custom UIKit navigation and SwiftUI routes. The API emits one `$mobile_screen_view` with `eventProperties.screen_name` for a new label; repeated calls with the active label are suppressed. A screen switch first emits any measured `$mobile_session_engagement` for the previous screen, with `engagement_duration_ms` and that previous `screen_name` (when automatic lifecycle tracking is on). Automatic screen discovery is not complete for custom navigation, so connect your own navigation callback.
+
+```swift
+func didShowRoute(_ route: AppRoute) {
+    switch route {
+    case .schedule:
+        op.trackScreen("Schedule")
+    case .booking:
+        op.trackScreen("Booking")
+    }
+}
+```
+
+Use fixed developer-chosen labels of 1–80 ASCII characters matching `^[A-Za-z][A-Za-z0-9 _-]{0,79}$`, without leading or trailing whitespace. Empty, URL-like, and non-ASCII strings are ignored. Validation cannot tell a patient name such as `Jane Smith` from a fixed label, so **never** pass patient data, visible titles, route parameters, or raw URLs. Map each route to a fixed label as above. The SDK does not inspect screen content.
+
+`trackScreen` and manual `track()` work with `trackAutomaticEvents: false`; iOS events still carry `defaultProperties.sid`, `mobile_session_started_at`, `mobile_occurred_at`, `mobile_platform: "ios"`, `mobile_contract_version: 1`, and app version/build when available. Automatic lifecycle tracking adds `$mobile_first_open`, `$mobile_app_open`, `$mobile_session_start`, `$mobile_session_engagement`, `$mobile_session_end` when observed, and `$mobile_app_update` on a later app version change. Canonical `$mobile_*` facts contain SDK metadata and stable screen labels, without caller default event or user properties. Full `optOutTracking()` clears queued events and suppresses manual screens, lifecycle facts, and purchases.
+
+#### StoreKit purchase collection
+
+StoreKit observation is separately disabled by default, even if `trackAutomaticEvents` is `true`. Set `trackAutomaticPurchases: true` at construction or use `OursPrivacyInitOptions(trackAutomaticPurchases: true)` during `initialize()` to keep legacy `$ae_iap` telemetry. You may enable purchases while automatic lifecycle tracking is off.
+
+```swift
+let op = OursPrivacy(token: "YOUR_API_TOKEN",
+                     trackAutomaticEvents: true,
+                     trackAutomaticPurchases: true)
+await op.initialize()
+```
+
+When enabled, a purchased StoreKit transaction emits `$ae_iap` with `eventProperties.$ae_iap_price` (string), `$ae_iap_quantity` (integer), and `$ae_iap_name` (product identifier). The purchase option controls both observation and queued `$ae_iap` delivery. Full opt-out suppresses it.
 
 ---
 

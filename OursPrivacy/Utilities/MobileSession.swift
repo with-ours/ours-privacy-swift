@@ -94,6 +94,13 @@ final class MobileSession {
     private let engagedThresholdMs: Int64 = 10 * 1_000
     private let rollbackToleranceMs: Int64 = 5 * 60 * 1_000
 
+    static func isValidScreenName(_ name: String) -> Bool {
+        guard name == name.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+        guard let match = name.range(of: "^[A-Za-z][A-Za-z0-9 _-]{0,79}$",
+                                     options: .regularExpression) else { return false }
+        return match == name.startIndex ..< name.endIndex
+    }
+
     private struct StoredState: Codable {
         var sid: String?
         var startedAtMs: Int64?
@@ -244,7 +251,7 @@ final class MobileSession {
                 appVersion: String? = nil, appBuild: String? = nil,
                 at point: MobileTimePoint) -> [MobileFact] {
         withLock {
-            guard !name.isEmpty, name != activeScreen else { return [] }
+            guard Self.isValidScreenName(name), name != activeScreen else { return [] }
             let previous = isForeground
                 ? engagement(at: point, force: true) : []
             _ = ensureSession(at: point, visitorId: visitorId,

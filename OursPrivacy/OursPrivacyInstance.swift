@@ -140,6 +140,9 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
     /// Enables automatic-event tracking. Forwarded to `AutomaticEvents`.
     open var trackAutomaticEventsEnabled: Bool
 
+    /// Enables legacy StoreKit `$ae_iap` collection. Defaults to false.
+    open internal(set) var trackAutomaticPurchasesEnabled: Bool
+
     /// Flush timer interval (seconds). 0 disables auto-flush; the host
     /// calls ``flush(performFullFlush:completion:)`` manually.
     open var flushInterval: Double {
@@ -247,11 +250,13 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
     ///
     /// `trackAutomaticEvents` is ignored on watchOS / macOS where automatic
     /// events aren't supported.
-    public convenience init(token: String, trackAutomaticEvents: Bool) {
+    public convenience init(token: String, trackAutomaticEvents: Bool,
+                            trackAutomaticPurchases: Bool = false) {
         self.init(apiToken: token,
                   flushInterval: 10,
                   name: token,
                   trackAutomaticEvents: trackAutomaticEvents,
+                  trackAutomaticPurchases: trackAutomaticPurchases,
                   optOutTrackingByDefault: false,
                   serverURL: nil,
                   proxyServerDelegate: nil,
@@ -261,11 +266,14 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
     /// Construct a new SDK instance bound to `token` with a custom proxy
     /// configuration. Call
     /// ``initialize(options:)`` immediately after.
-    public convenience init(token: String, trackAutomaticEvents: Bool, proxyServerConfig: ProxyServerConfig) {
+    public convenience init(token: String, trackAutomaticEvents: Bool,
+                            trackAutomaticPurchases: Bool = false,
+                            proxyServerConfig: ProxyServerConfig) {
         self.init(apiToken: token,
                   flushInterval: 10,
                   name: token,
                   trackAutomaticEvents: trackAutomaticEvents,
+                  trackAutomaticPurchases: trackAutomaticPurchases,
                   optOutTrackingByDefault: false,
                   serverURL: proxyServerConfig.serverUrl,
                   proxyServerDelegate: proxyServerConfig.delegate,
@@ -276,6 +284,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
                  flushInterval: Double,
                  name: String,
                  trackAutomaticEvents: Bool,
+                 trackAutomaticPurchases: Bool,
                  optOutTrackingByDefault: Bool = false,
                  serverURL: String? = nil,
                  proxyServerDelegate: OursPrivacyProxyServerDelegate? = nil,
@@ -284,6 +293,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
             self.apiToken = apiToken
         }
         trackAutomaticEventsEnabled = trackAutomaticEvents
+        trackAutomaticPurchasesEnabled = trackAutomaticPurchases
         if let serverURL = serverURL {
             self.serverURL = serverURL
         }
@@ -622,6 +632,9 @@ extension OursPrivacy {
     /// on first launch (only when no persisted opt-in / opt-out decision
     /// exists).
     public func initialize(options: OursPrivacyInitOptions? = nil) async {
+        if let trackAutomaticPurchases = options?.trackAutomaticPurchases {
+            trackAutomaticPurchasesEnabled = trackAutomaticPurchases
+        }
         if let serverURL = options?.serverURL {
             self.serverURL = serverURL
         }
@@ -647,9 +660,17 @@ extension OursPrivacy {
             }
         }
         #if os(iOS) || os(tvOS) || os(visionOS)
-            if !OursPrivacy.isiOSAppExtension() && trackAutomaticEventsEnabled {
+            if !OursPrivacy.isiOSAppExtension() {
                 await MainActor.run {
-                    automaticEvents.initializeEvents(instanceName: name)
+                    if trackAutomaticEventsEnabled {
+                        automaticEvents.initializeEvents(instanceName: name)
+                    }
+                    if trackAutomaticPurchasesEnabled {
+                        automaticEvents.delegate = self
+                        if !hasOptedOutTracking() {
+                            automaticEvents.registerPurchaseObserver()
+                        }
+                    }
                 }
             }
         #endif
@@ -914,7 +935,8 @@ extension OursPrivacy {
             let eventQueue = self.oursprivacyPersistence.loadEntitiesInBatch(
                 type: .events,
                 batchSize: performFullFlush ? Int.max : self.flushBatchSize,
-                excludeAutomaticEvents: !self.trackAutomaticEventsEnabled
+                excludeAutomaticEvents: !self.trackAutomaticEventsEnabled,
+                excludeAutomaticPurchases: !self.trackAutomaticPurchasesEnabled
             )
             let pendingEvents = PersistedEventTransfer(value: eventQueue)
             self.networkQueue.async { [weak self, completion, pendingEvents] in
@@ -965,6 +987,31 @@ extension OursPrivacy {
 
 extension OursPrivacy {
     // MARK: - Track
+
+    /// Records a stable screen transition as `$mobile_screen_view`. Use fixed
+    /// developer-chosen labels for custom UIKit or SwiftUI navigation; never pass
+    /// titles, URLs, route parameters, or patient data.
+    public func trackScreen(_ name: String) {
+        guard MobileSession.isValidScreenName(name) else { return }
+        let point = captureMobileTime()
+        trackingQueue.async { [weak self] in
+            guard let self, !self.hasOptedOutTracking(),
+                  self.clearPrivacyQueueIfNeeded() else { return }
+            self.queuePendingMobileFacts()
+            if self.mobileRuntimeEnabled, let mobileSession = self.mobileSession {
+                _ = mobileSession.screen(name, visitorId: self.visitorId,
+                                         appVersion: AutomaticProperties.appVersion,
+                                         appBuild: AutomaticProperties.appBuild, at: point)
+                self.queuePendingMobileFacts()
+            } else {
+                let context = self.currentEventContext(at: point)
+                let item = self.trackInstance.composeTrackEvent(
+                    event: "$mobile_screen_view", eventProperties: ["screen_name": name],
+                    userProperties: nil, context: context)
+                self.oursprivacyPersistence.saveEntity(item, type: .events)
+            }
+        }
+    }
 
     /// Record an event. `properties` becomes `eventProperties` on the wire
     /// (after merging the store-level default event properties).
@@ -1022,6 +1069,9 @@ extension OursPrivacy {
     public func optOutTracking() {
         trackingQueue.async { [weak self] in
             guard let self = self else { return }
+            #if os(iOS) || os(tvOS) || os(visionOS)
+                self.automaticEvents.unregisterPurchaseObserver()
+            #endif
             self.mobileCheckpointTimer?.cancel()
             self.mobileCheckpointTimer = nil
             self.mobilePendingRetryTimer?.cancel()
@@ -1060,6 +1110,11 @@ extension OursPrivacy {
             self.readWriteLock.read {
                 OursPrivacyPersistence.saveOptOutStatusFlag(value: self.optOutStatus!, instanceName: self.name)
             }
+            #if os(iOS) || os(tvOS) || os(visionOS)
+                if self.trackAutomaticPurchasesEnabled && self.mobileLifecycleReady {
+                    self.automaticEvents.registerPurchaseObserver()
+                }
+            #endif
             if shouldIdentify {
                 self.enqueueIdentify(capturedUserProperties, at: self.captureMobileTime(),
                                      completion: nil)

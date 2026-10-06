@@ -115,12 +115,17 @@ class OursPrivacyPersistence {
     func loadEntitiesInBatch(type: PersistenceType,
                              batchSize: Int = Int.max,
                              flag: Bool = false,
-                             excludeAutomaticEvents: Bool = false) -> [InternalProperties] {
+                             excludeAutomaticEvents: Bool = false,
+                             excludeAutomaticPurchases: Bool = false) -> [InternalProperties] {
         guard type == .events else { return [] }
         var snapshot: [InternalProperties] = []
         queueLock.read { snapshot = inMemoryQueue }
-        if excludeAutomaticEvents {
-            snapshot = snapshot.filter { !(($0["event"] as? String) ?? "").hasPrefix("$ae_") }
+        if excludeAutomaticEvents || excludeAutomaticPurchases {
+            snapshot = snapshot.filter { item in
+                let name = item["event"] as? String ?? ""
+                if name == "$ae_iap" { return !excludeAutomaticPurchases }
+                return !excludeAutomaticEvents || !name.hasPrefix("$ae_")
+            }
         }
         if batchSize == Int.max { return snapshot }
         return Array(snapshot.prefix(batchSize))
