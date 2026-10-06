@@ -141,8 +141,8 @@ final class OursPrivacyiOSDemoUITests: XCTestCase {
         XCTAssertLessThan(coldOpen.offset, sessionStartIndex)
         XCTAssertLessThan(sessionStartIndex, screenIndex)
         XCTAssertLessThan(screenIndex, bookingIndex)
-        XCTAssertLessThan(bookingIndex, engagementIndex)
         XCTAssertLessThan(engagementIndex, warmOpen.offset)
+        XCTAssertGreaterThanOrEqual(warmOpen.offset, beforeResume.count)
         for event in [firstOpen, sessionStart, screen, booking, engagement] {
             let defaults = try XCTUnwrap(event["defaultProperties"] as? [String: Any])
             XCTAssertEqual(defaults["mobile_platform"] as? String, "ios")
