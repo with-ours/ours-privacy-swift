@@ -277,7 +277,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
     ///
     /// `trackAutomaticEvents` is ignored on watchOS / macOS where automatic
     /// events aren't supported.
-    public convenience init(token: String, trackAutomaticEvents: Bool,
+    public convenience init(token: String, trackAutomaticEvents: Bool = false,
                             trackAutomaticPurchases: Bool = false) {
         self.init(apiToken: token,
                   flushInterval: 10,
@@ -293,7 +293,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
     /// Construct a new SDK instance bound to `token` with a custom proxy
     /// configuration. Call
     /// ``initialize(options:)`` immediately after.
-    public convenience init(token: String, trackAutomaticEvents: Bool,
+    public convenience init(token: String, trackAutomaticEvents: Bool = false,
                             trackAutomaticPurchases: Bool = false,
                             proxyServerConfig: ProxyServerConfig) {
         self.init(apiToken: token,

@@ -142,7 +142,7 @@ Construct an instance. Hold a single `OursPrivacy` for the lifetime of your app.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `token` | `String` | Yes | Your project token |
-| `trackAutomaticEvents` | `Bool` | Yes | Record iOS lifecycle, engagement, and update events automatically (ignored on watchOS / macOS) |
+| `trackAutomaticEvents` | `Bool` | No | Record iOS lifecycle, engagement, and update events automatically; defaults to `false` (ignored on watchOS / macOS) |
 | `trackAutomaticPurchases` | `Bool` | No | Observe StoreKit purchases and emit legacy `$ae_iap`; defaults to `false`, independent of lifecycle tracking |
 
 ```swift
@@ -150,6 +150,7 @@ let op = OursPrivacy(token: "YOUR_API_TOKEN", trackAutomaticEvents: true)
 ```
 
 There is also an overload that accepts a `ProxyServerConfig` if you route ingest through a proxy.
+Both overloads leave automatic lifecycle tracking off when `trackAutomaticEvents` is omitted.
 
 ---
 
@@ -319,15 +320,16 @@ An indexed `/ingest` response acknowledges accepted and rejected items together.
 
 ```swift
 await op.initialize(options: OursPrivacyInitOptions(
-    onIngestRejected: { distinctId, code in
-        print("Ingest rejected \(distinctId): \(code)")
+    onIngestRejected: { _, code in
+        print("Ingest rejected: \(code)")
     }
 ))
 ```
 
-The callback runs on the SDK network queue after queue removal succeeds. Its arguments
-contain only `distinct_id` and the rejection code; event properties and patient fields
-are excluded. Keep callback work brief or dispatch it to your app's queue. Transport
+The callback runs on the SDK network queue after queue removal succeeds. It receives
+`distinct_id` and the rejection code, without event properties. A caller can supply
+`$distinct_id`, so the ID may contain patient data; log only the code. Keep callback
+work brief or dispatch it to your app's queue. Transport
 failures and malformed or stale responses retain queued events without invoking it.
 Legacy no-index responses can acknowledge batches until this source token has received
 an indexed response; indexed mode persists across app restarts.
@@ -556,7 +558,7 @@ op.trackDeepLink("myapp://open?aleid=click_abc&alart=user_xyz&utm_source=applovi
 
 #### `op.optOutTracking()`
 
-Stop all tracking immediately. Any queued events that have not been flushed will be discarded. Call `flush()` first if you want to preserve queued events.
+Stop all tracking immediately. Any queued events that have not been flushed will be discarded. Call `flush()` first if you want to preserve queued events. Opt-out rotates `visitor_id` and clears the current mobile session. A later opt-in starts a new session under the new visitor ID, so reports do not automatically link activity before and after opt-out.
 
 **Returns:** `Void`
 

@@ -372,7 +372,7 @@ final class OursPrivacyTests: XCTestCase {
 
     private func makeInstance() -> OursPrivacy {
         let token = "test-\(UUID().uuidString)"
-        return OursPrivacy(token: token, trackAutomaticEvents: false)
+        return OursPrivacy(token: token)
     }
 
     func testUpdateDefaultEventPropertiesMergesPerCallWins() {
