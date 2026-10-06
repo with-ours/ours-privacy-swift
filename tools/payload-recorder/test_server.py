@@ -35,7 +35,7 @@ class RecorderTests(unittest.TestCase):
                 with urlopen(f"{url}/captures") as response:
                     self.assertEqual(json.load(response), [])
 
-                payload = {"token": "test-token", "data": [{"event": "Started"}]}
+                payload = {"token": "test-token", "data": [{"event": "Started"}, {"event": "Booked"}]}
                 request = Request(
                     f"{url}/ingest",
                     data=json.dumps(payload).encode(),
@@ -44,6 +44,12 @@ class RecorderTests(unittest.TestCase):
                 )
                 with urlopen(request) as response:
                     self.assertEqual(response.status, 200)
+                    self.assertEqual(json.load(response), {
+                        "success": True,
+                        "visitor_id": "recorder-visitor",
+                        "accepted": 2,
+                        "rejected": [],
+                    })
 
                 with urlopen(f"{url}/captures") as response:
                     self.assertEqual(json.load(response), [payload])

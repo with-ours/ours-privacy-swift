@@ -110,6 +110,18 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
     /// Optional delegate that can veto a flush attempt.
     open weak var delegate: OursPrivacyDelegate?
 
+    /// Called on the network queue after an indexed rejection leaves durable storage.
+    /// Receives only the event's `distinct_id` and a code, without event properties.
+    open var onIngestRejected: (@Sendable (String, String) -> Void)? {
+        get {
+            var callback: (@Sendable (String, String) -> Void)?
+            readWriteLock.read { callback = _onIngestRejected }
+            return callback
+        }
+        set { readWriteLock.write { _onIngestRejected = newValue } }
+    }
+    private var _onIngestRejected: (@Sendable (String, String) -> Void)?
+
     /// Stable per-install identifier sent as `visitor_id` on every event.
     /// Generated lazily on first launch and persisted in NSUserDefaults
     /// under the OursPrivacy suite. Reset by ``reset(completion:)``.
@@ -638,6 +650,9 @@ extension OursPrivacy {
     /// on first launch (only when no persisted opt-in / opt-out decision
     /// exists).
     public func initialize(options: OursPrivacyInitOptions? = nil) async {
+        if let callback = options?.onIngestRejected {
+            onIngestRejected = callback
+        }
         if let trackAutomaticPurchases = options?.trackAutomaticPurchases {
             trackAutomaticPurchasesEnabled = trackAutomaticPurchases
         }
@@ -974,11 +989,20 @@ extension OursPrivacy {
         type == .events && !hasOptedOutTracking() && oursprivacyPersistence.containsFlushRows(rows)
     }
 
-    func flushSuccess(type: FlushType, rowIDs: [String]) {
-        trackingQueue.async { [weak self] in
-            guard let self = self else { return }
-            self.oursprivacyPersistence.removeFlushedRows(rowIDs, type: .events)
-        }
+    func acknowledgeFlush(type: FlushType, rowIDs: [String]) -> Bool {
+        type == .events && oursprivacyPersistence.removeFlushedRows(rowIDs, type: .events)
+    }
+
+    func hasIndexedIngestMode() -> Bool {
+        oursprivacyPersistence.hasIndexedIngestMode
+    }
+
+    func persistIndexedIngestMode() -> Bool {
+        oursprivacyPersistence.persistIndexedIngestMode()
+    }
+
+    func reportIngestRejection(distinctId: String, code: String) {
+        onIngestRejected?(distinctId, code)
     }
 
     func flushEnvelopeContext() -> (token: String, isManuallySetId: Bool) {

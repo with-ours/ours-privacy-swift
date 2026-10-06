@@ -24,6 +24,9 @@ python3 tools/payload-recorder/server.py
 ```
 
 Point the SDK at it with `OursPrivacyInitOptions(serverURL: "http://127.0.0.1:8765")`, then track and flush. `GET /captures` returns the captured envelopes as JSON for tests.
+Each captured `/ingest` batch receives an indexed HTTP 200 acknowledgment with
+`accepted` equal to its `data` item count and an empty `rejected` array, so the
+SDK can drain its local queue during simulator runs.
 
 Each POST body is written as pretty-printed JSON to `captures/<timestamp>-<seq><path>.json`.
 

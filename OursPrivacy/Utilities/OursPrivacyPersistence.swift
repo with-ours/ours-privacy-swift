@@ -28,6 +28,7 @@ struct OursPrivacyUserDefaultsKeys {
     static let isManuallySetId = "OPIsManuallySetId"
     static let eventQueue = "OPEventQueue"
     static let privacyClearPending = "OPPrivacyClearPending"
+    static let indexedIngestMode = "OPIndexedIngestMode"
 
     // Legacy keys (pre-canonical) — read once on first canonical launch so
     // they can be cleaned up, then never written again.
@@ -161,19 +162,35 @@ class OursPrivacyPersistence {
         return current
     }
 
-    func removeFlushedRows(_ rowIDs: [String], type: PersistenceType) {
-        guard type == .events, !rowIDs.isEmpty else { return }
+    func removeFlushedRows(_ rowIDs: [String], type: PersistenceType) -> Bool {
+        guard type == .events, !rowIDs.isEmpty else { return false }
         let toRemove = Set(rowIDs)
+        guard toRemove.count == rowIDs.count else { return false }
+        var removed = false
         queueLock.write {
             guard !privacyClearPending else { return }
+            let liveIDs = Set(inMemoryQueue.compactMap { $0[Self.localRowIDKey] as? String })
+            guard toRemove.isSubset(of: liveIDs) else { return }
             let proposal = inMemoryQueue.filter { row in
                 guard let id = row[Self.localRowIDKey] as? String else { return true }
                 return !toRemove.contains(id)
             }
             if persistQueueToDefaults(proposal, firstOpenAccepted: firstOpenQueueEvidence) {
                 inMemoryQueue = proposal
+                removed = true
             }
         }
+        return removed
+    }
+
+    var hasIndexedIngestMode: Bool {
+        defaults?.bool(forKey: indexedIngestModeKey()) ?? false
+    }
+
+    func persistIndexedIngestMode() -> Bool {
+        guard let defaults else { return false }
+        defaults.set(true, forKey: indexedIngestModeKey())
+        return defaults.synchronize() && defaults.bool(forKey: indexedIngestModeKey())
     }
 
     func resetEntities() {
@@ -223,6 +240,10 @@ class OursPrivacyPersistence {
 
     private func privacyClearKey() -> String {
         "\(OursPrivacyUserDefaultsKeys.prefix)-\(instanceName)-\(OursPrivacyUserDefaultsKeys.privacyClearPending)"
+    }
+
+    private func indexedIngestModeKey() -> String {
+        "\(OursPrivacyUserDefaultsKeys.prefix)-\(instanceName)-\(OursPrivacyUserDefaultsKeys.indexedIngestMode)"
     }
 
     private func persistPrivacyClearPending(_ required: Bool) -> Bool {
@@ -383,6 +404,7 @@ class OursPrivacyPersistence {
         if !preserveEventQueue {
             defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.eventQueue)")
             defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.privacyClearPending)")
+            defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.indexedIngestMode)")
         }
         defaults.synchronize()
     }

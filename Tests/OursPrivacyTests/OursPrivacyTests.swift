@@ -6,11 +6,11 @@ private final class RecordingFlushRequest: FlushRequest, @unchecked Sendable {
     private var bodies: [String] = []
 
     override func sendRequest(_ requestData: String, type: FlushType,
-                              headers: [String: String], queryItems: [URLQueryItem] = []) -> Bool {
+                              headers: [String: String], queryItems: [URLQueryItem] = []) -> IngestBatchResult? {
         lock.lock()
         bodies.append(requestData)
         lock.unlock()
-        return true
+        return IngestBatchResult(success: true, visitorId: "legacy", accepted: nil, rejected: nil)
     }
 
     var sentBodies: [String] {
@@ -27,7 +27,7 @@ private final class HeldFirstFlushRequest: FlushRequest, @unchecked Sendable {
     private var bodies: [String] = []
 
     override func sendRequest(_ requestData: String, type: FlushType,
-                              headers: [String: String], queryItems: [URLQueryItem] = []) -> Bool {
+                              headers: [String: String], queryItems: [URLQueryItem] = []) -> IngestBatchResult? {
         lock.lock()
         bodies.append(requestData)
         let isFirst = bodies.count == 1
@@ -36,7 +36,7 @@ private final class HeldFirstFlushRequest: FlushRequest, @unchecked Sendable {
             firstStarted.signal()
             _ = releaseFirst.wait(timeout: .now() + 5)
         }
-        return true
+        return IngestBatchResult(success: true, visitorId: "legacy", accepted: nil, rejected: nil)
     }
 
     var sentBodies: [String] {

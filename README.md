@@ -167,6 +167,7 @@ Apply boot-time options and start the flush timer. Call once, immediately after 
 |-------|------|-------------|
 | `optedOutByDefault` | `Bool` | If `true`, tracking starts opted out (default: `false`) |
 | `trackAutomaticPurchases` | `Bool?` | Override the constructor's purchase choice at boot; omitted keeps it unchanged (default: `false`) |
+| `onIngestRejected` | `(@Sendable (String, String) -> Void)?` | Called with an event's `distinct_id` and rejection code after the rejected batch leaves the durable queue |
 | `visitorId` | `String` | Pre-set the visitor ID; sets `is_manually_set_id: true` on all events |
 | `defaultEventProperties` | `[String: OursPrivacyType]` | Properties merged into `eventProperties` on every `track()` call |
 | `defaultUserCustomProperties` | `[String: OursPrivacyType]` | Properties merged into `userProperties.custom_properties` on every event |
@@ -312,6 +313,24 @@ Push all queued events to the server immediately. Useful before app close or log
 ```swift
 op.flush()
 ```
+
+An indexed `/ingest` response acknowledges accepted and rejected items together. Set
+`onIngestRejected` in `OursPrivacyInitOptions` or on the instance to handle rejected events:
+
+```swift
+await op.initialize(options: OursPrivacyInitOptions(
+    onIngestRejected: { distinctId, code in
+        print("Ingest rejected \(distinctId): \(code)")
+    }
+))
+```
+
+The callback runs on the SDK network queue after queue removal succeeds. Its arguments
+contain only `distinct_id` and the rejection code; event properties and patient fields
+are excluded. Keep callback work brief or dispatch it to your app's queue. Transport
+failures and malformed or stale responses retain queued events without invoking it.
+Legacy no-index responses can acknowledge batches until this source token has received
+an indexed response; indexed mode persists across app restarts.
 
 ---
 
