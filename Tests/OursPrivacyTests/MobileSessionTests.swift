@@ -293,6 +293,74 @@ final class MobileSessionTests: XCTestCase {
         XCTAssertNotEqual(next.sid, opened[0].sid)
     }
 
+    func testManualSnapshotAfterRollbackPreservesOldForegroundEngagement() {
+        let name = "manual-rollback-\(UUID().uuidString)"
+        let session = makeSession(name)
+        let opened = session.foreground(automaticEnabled: true, visitorId: "visitor-a",
+                                        appVersion: "2.3", appBuild: "45", at: point(0))
+        let rollback = MobileTimePoint(epochMs: origin - 300_001, monotonicMs: 10_000)
+
+        let manual = session.snapshot(visitorId: "visitor-b", appVersion: "9.0",
+                                      appBuild: "90", at: rollback)
+
+        XCTAssertNotEqual(manual.sid, opened[0].sid)
+        XCTAssertEqual(manual.startedAtMs, rollback.epochMs)
+        XCTAssertEqual(manual.occurredAtMs, rollback.epochMs)
+        XCTAssertEqual(manual.visitorId, "visitor-b")
+        let engagements = session.pendingFacts.filter { $0.name == "$mobile_session_engagement" }
+        XCTAssertEqual(engagements.count, 1)
+        guard let engagement = engagements.first else { return }
+        XCTAssertEqual(engagement.properties["engagement_duration_ms"] as? Int64, 10_000)
+        XCTAssertEqual(engagement.sid, opened[0].sid)
+        XCTAssertEqual(engagement.visitorId, "visitor-a")
+        XCTAssertEqual(engagement.appVersion, "2.3")
+        XCTAssertEqual(engagement.appBuild, "45")
+        XCTAssertGreaterThanOrEqual(engagement.occurredAtMs, engagement.startedAtMs)
+        XCTAssertFalse(engagement.distinctId.isEmpty)
+        XCTAssertTrue(session.background(at: point(20_000, wallMs: rollback.epochMs)).isEmpty)
+
+        let restored = makeSession(name)
+        let pending = restored.pendingFacts.first { $0.distinctId == engagement.distinctId }
+        XCTAssertEqual(pending?.sid, engagement.sid)
+        XCTAssertEqual(pending?.visitorId, engagement.visitorId)
+        XCTAssertEqual(pending?.occurredAtMs, engagement.occurredAtMs)
+    }
+
+    func testScheduleScreenReentryAfterWarmForegroundEmitsAnotherView() {
+        let session = makeSession()
+        let opened = session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(0))
+        let firstView = session.screen("Schedule", visitorId: "visitor-a", at: point(0))
+        XCTAssertEqual(firstView.map(\.name), ["$mobile_screen_view"])
+        _ = session.background(at: point(10_000))
+        let warmOpen = session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(11_000))
+
+        let reentry = session.screen("Schedule", visitorId: "visitor-a", at: point(11_000))
+
+        XCTAssertEqual(warmOpen.map(\.name), ["$mobile_app_open"])
+        XCTAssertEqual(reentry.map(\.name), ["$mobile_screen_view"])
+        XCTAssertEqual(reentry.first?.sid, opened[0].sid)
+        XCTAssertEqual(reentry.first?.properties["screen_name"] as? String, "Schedule")
+        XCTAssertTrue(session.screen("Schedule", visitorId: "visitor-a", at: point(11_000)).isEmpty)
+    }
+
+    func testScheduleAsFirstSignalAtThirtyMinuteExpiryRotatesAndEmitsView() {
+        let session = makeSession()
+        let opened = session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(0))
+        let firstOpenId = opened[0].distinctId
+        _ = session.screen("Schedule", visitorId: "visitor-a", at: point(0))
+        _ = session.background(at: point(10_000))
+
+        let reentry = session.screen("Schedule", visitorId: "visitor-a", at: point(1_810_000))
+
+        let views = reentry.filter { $0.name == "$mobile_screen_view" }
+        XCTAssertEqual(views.count, 1)
+        XCTAssertNotEqual(views.first?.sid, opened[0].sid)
+        XCTAssertEqual(views.first?.properties["screen_name"] as? String, "Schedule")
+        XCTAssertEqual(views.first?.occurredAtMs, origin + 1_810_000)
+        XCTAssertTrue(session.pendingFacts.contains { $0.distinctId == firstOpenId })
+        XCTAssertFalse(session.hasAcceptedFirstOpen)
+    }
+
     func testScreenSwitchCheckpointsPriorScreenAndDeduplicatesName() {
         let session = makeSession()
         _ = session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(0))

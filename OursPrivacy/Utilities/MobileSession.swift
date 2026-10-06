@@ -215,6 +215,7 @@ final class MobileSession {
             isForeground = false
             handledAutomaticForeground = false
             checkpointMonotonicMs = nil
+            activeScreen = nil
             state.lastActiveAtMs = max(point.epochMs, state.startedAtMs ?? point.epochMs)
             state.lastObservedWallMs = max(state.lastObservedWallMs ?? point.epochMs, point.epochMs)
             persist()
@@ -262,6 +263,9 @@ final class MobileSession {
     func snapshot(visitorId: String, appVersion: String? = nil, appBuild: String? = nil,
                   at point: MobileTimePoint) -> MobileSessionSnapshot {
         withLock {
+            if isForeground && isLargeRollback(at: point.epochMs) {
+                _ = engagement(at: point, force: true)
+            }
             _ = ensureSession(at: point, visitorId: visitorId,
                               appVersion: appVersion, appBuild: appBuild)
             state.lastActiveAtMs = max(point.epochMs, state.startedAtMs ?? point.epochMs)
