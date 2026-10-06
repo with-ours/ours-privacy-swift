@@ -56,7 +56,10 @@ final class OursPrivacyiOSDemoUITests: XCTestCase {
                                           recorderURL: recorderURL, screenName: "Schedule")
         let duration = try XCTUnwrap((engagement["eventProperties"] as? [String: Any])?["engagement_duration_ms"] as? Int)
         XCTAssertGreaterThan(duration, 0)
+        XCTAssertEqual(engagement["visitor_id"] as? String, visitorId)
         XCTAssertEqual((engagement["defaultProperties"] as? [String: Any])?["sid"] as? String, sid)
+        let beforeResume = try events(token: token, recorderURL: recorderURL)
+        XCTAssertEqual(beforeResume.filter { $0["event"] as? String == "$mobile_app_open" }.count, 1)
         app.activate()
         XCTAssertTrue(start.waitForExistence(timeout: 10))
 
@@ -110,18 +113,36 @@ final class OursPrivacyiOSDemoUITests: XCTestCase {
 
         let captured = try events(token: token, recorderURL: recorderURL)
         XCTAssertEqual(captured.filter { $0["event"] as? String == "$mobile_first_open" }.count, 1)
-        XCTAssertEqual(captured.filter { $0["event"] as? String == "$mobile_app_open" }.count, 2)
+        let appOpens = captured.enumerated().filter { $0.element["event"] as? String == "$mobile_app_open" }
+        XCTAssertEqual(appOpens.count, 2)
+        let coldOpen = try XCTUnwrap(appOpens.first)
+        let warmOpen = try XCTUnwrap(appOpens.last)
+        for appOpen in [coldOpen.element, warmOpen.element] {
+            XCTAssertEqual(appOpen["visitor_id"] as? String, visitorId)
+            XCTAssertEqual((appOpen["defaultProperties"] as? [String: Any])?["sid"] as? String, sid)
+        }
         XCTAssertEqual(captured.filter { $0["event"] as? String == "$mobile_session_start" }.count, 1)
-        let automatic = captured.filter { ($0["event"] as? String)?.hasPrefix("$mobile_") == true }
+        let automatic = captured.filter {
+            let name = $0["event"] as? String
+            return name?.hasPrefix("$mobile_") == true || name?.hasPrefix("$ae_") == true
+        }
         XCTAssertFalse(automatic.isEmpty)
         XCTAssertFalse(captured.contains { $0["event"] as? String == "$ae_iap" })
         let firstOpenIndex = try XCTUnwrap(captured.firstIndex { $0["event"] as? String == "$mobile_first_open" })
         let sessionStartIndex = try XCTUnwrap(captured.firstIndex { $0["event"] as? String == "$mobile_session_start" })
         let screenIndex = try XCTUnwrap(captured.firstIndex { $0["event"] as? String == "$mobile_screen_view" })
         let bookingIndex = try XCTUnwrap(captured.firstIndex { $0["event"] as? String == "appointment_booked" })
+        let engagementIndex = try XCTUnwrap(captured.firstIndex {
+            $0["event"] as? String == "$mobile_session_engagement" &&
+                ($0["eventProperties"] as? [String: Any])?["screen_name"] as? String == "Schedule"
+        })
         XCTAssertLessThan(firstOpenIndex, sessionStartIndex)
+        XCTAssertLessThan(firstOpenIndex, coldOpen.offset)
+        XCTAssertLessThan(coldOpen.offset, sessionStartIndex)
         XCTAssertLessThan(sessionStartIndex, screenIndex)
         XCTAssertLessThan(screenIndex, bookingIndex)
+        XCTAssertLessThan(bookingIndex, engagementIndex)
+        XCTAssertLessThan(engagementIndex, warmOpen.offset)
         for event in [firstOpen, sessionStart, screen, booking, engagement] {
             let defaults = try XCTUnwrap(event["defaultProperties"] as? [String: Any])
             XCTAssertEqual(defaults["mobile_platform"] as? String, "ios")
@@ -138,7 +159,8 @@ final class OursPrivacyiOSDemoUITests: XCTestCase {
         let automaticJSON = try XCTUnwrap(String(data: JSONSerialization.data(withJSONObject: automatic),
                                                  encoding: .utf8)).lowercased()
         for forbidden in [initialURL.lowercased(), "private-demo-value", "private-ad-value",
-                          "patient_email", "idfa", "gaid", "idfv", "app_set_id"] {
+                          "patient", "advertising_id", "idfa", "gaid", "idfv", "app_set_id",
+                          "https://", "http://"] {
             XCTAssertFalse(automaticJSON.contains(forbidden), forbidden)
         }
         let capturedJSON = try XCTUnwrap(String(data: JSONSerialization.data(withJSONObject: captured),
