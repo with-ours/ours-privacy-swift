@@ -1,6 +1,6 @@
 import Foundation
 
-struct MobileTimePoint {
+struct MobileTimePoint: Sendable {
     let epochMs: Int64
     let monotonicMs: Int64
 
@@ -286,9 +286,38 @@ final class MobileSession {
         }
     }
 
+    func rotate(to visitorId: String, appVersion: String?, appBuild: String?,
+                at point: MobileTimePoint) -> [MobileFact] {
+        withLock {
+            let wasForeground = isForeground
+            let wasAutomatic = handledAutomaticForeground
+            let facts = isForeground ? engagement(at: point, force: true) : []
+            clearSession()
+            _ = ensureSession(at: point, visitorId: visitorId,
+                              appVersion: appVersion, appBuild: appBuild)
+            state.lastActiveAtMs = point.epochMs
+            isForeground = wasForeground
+            handledAutomaticForeground = wasAutomatic
+            checkpointMonotonicMs = wasForeground ? point.monotonicMs : nil
+            activeVisitorId = wasForeground ? visitorId : nil
+            activeAppVersion = wasForeground ? appVersion : nil
+            activeAppBuild = wasForeground ? appBuild : nil
+            persist()
+            return facts
+        }
+    }
+
     func disable() {
         withLock {
             clearSession()
+            state.pendingFacts.removeAll()
+            replayPendingOnForeground = false
+            persist()
+        }
+    }
+
+    func discardPendingFacts() {
+        withLock {
             state.pendingFacts.removeAll()
             replayPendingOnForeground = false
             persist()

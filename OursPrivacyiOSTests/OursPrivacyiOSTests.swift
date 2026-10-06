@@ -36,6 +36,48 @@ struct OursPrivacyiOSTests {
         #expect(finished.wait(timeout: .now() + .seconds(1)) == .success)
     }
 
+    @Test @MainActor func primingOnMainReleasesBackgroundPreparedQueue() {
+        let queue = DispatchQueue(label: "ios-mobile-preparation-\(UUID().uuidString)")
+        let prepared = DispatchSemaphore(value: 0)
+        let processed = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            AutomaticProperties.prepareUIProperties(beforeProcessing: queue)
+            prepared.signal()
+        }
+        #expect(prepared.wait(timeout: .now() + .seconds(2)) == .success)
+        AutomaticProperties.primeUIPropertiesIfOnMain()
+        queue.async { processed.signal() }
+        #expect(processed.wait(timeout: .now() + .seconds(1)) == .success)
+    }
+
+    @Test @MainActor func iosRuntimeQueuesCanonicalOpenWithStitchedBooking() async {
+        let op = OursPrivacy(token: "ios-mobile-\(UUID().uuidString)", trackAutomaticEvents: true)
+        #expect(op.mobileRuntimeEnabled)
+        await op.initialize(options: OursPrivacyInitOptions(
+            initialURL: "https://example.test/?ours_visitor_id=linked-ios&utm_source=campaign",
+            defaultEventProperties: ["caller_field": "private"]))
+        op.mobileForeground(at: MobileTimePoint.capture())
+        op.track(event: "appointment_booked")
+        op.trackingQueue.sync {}
+
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let mobile = items.filter { ($0["event"] as? String)?.hasPrefix("$mobile_") == true }
+        #expect(mobile.filter { $0["event"] as? String == "$mobile_first_open" }.count == 1)
+        #expect(mobile.filter { $0["event"] as? String == "$mobile_app_open" }.count == 1)
+        let booked = items.first { $0["event"] as? String == "appointment_booked" }
+        let openDefaults = mobile.first?["defaultProperties"] as? [String: Any]
+        let bookedDefaults = booked?["defaultProperties"] as? [String: Any]
+        #expect(openDefaults?["sid"] as? String == bookedDefaults?["sid"] as? String)
+        #expect(mobile.allSatisfy { $0["visitor_id"] as? String == "linked-ios" })
+        #expect(booked?["visitor_id"] as? String == "linked-ios")
+        #expect(openDefaults?["mobile_platform"] as? String == "ios")
+        #expect(openDefaults?["os_name"] as? String == "iOS")
+        #expect(openDefaults?["utm_source"] == nil)
+        #expect((mobile.first?["eventProperties"] as? [String: Any])?["caller_field"] == nil)
+        #expect(bookedDefaults?["utm_source"] as? String == "campaign")
+        #expect((booked?["eventProperties"] as? [String: Any])?["caller_field"] as? String == "private")
+    }
+
     @Test @MainActor func backgroundInitializationPreservesFirstEventMetadataAndOrder() async {
         let constructed = DispatchSemaphore(value: 0)
         let processed = DispatchSemaphore(value: 0)

@@ -20,6 +20,7 @@ struct EventContext {
     let userCustomProperties: [String: Any]
     let userConsentProperties: [String: Any]
     let attributionDefaultProperties: [String: Any]
+    var mobileSnapshot: MobileSessionSnapshot?
 }
 
 class Track {
@@ -77,6 +78,9 @@ class Track {
         var defaultProperties: InternalProperties = [:]
         defaultProperties += AutomaticProperties.defaultProperties
         defaultProperties += context.attributionDefaultProperties
+        if let snapshot = context.mobileSnapshot {
+            defaultProperties += snapshot.defaultProperties
+        }
 
         let item: InternalProperties = [
             "event": name,
@@ -106,6 +110,9 @@ class Track {
         var defaultProperties: InternalProperties = [:]
         defaultProperties += AutomaticProperties.defaultProperties
         defaultProperties += context.attributionDefaultProperties
+        if let snapshot = context.mobileSnapshot {
+            defaultProperties += snapshot.defaultProperties
+        }
 
         return [
             "event": "$identify",
@@ -114,6 +121,21 @@ class Track {
             "eventProperties": NSNull(),
             "userProperties": merged ?? NSNull(),
             "defaultProperties": defaultProperties
+        ]
+    }
+
+    func composeMobileFact(_ fact: MobileFact) -> InternalProperties {
+        let allowed = Set(["device_vendor", "device_model", "device_type", "os_name",
+                           "os_version", "screen_width", "screen_height", "version"])
+        var defaults = AutomaticProperties.defaultProperties.filter { allowed.contains($0.key) }
+        defaults += fact.defaultProperties
+        return [
+            "event": fact.name,
+            "visitor_id": fact.visitorId,
+            "distinct_id": fact.distinctId,
+            "eventProperties": fact.properties.isEmpty ? NSNull() : fact.properties,
+            "userProperties": NSNull(),
+            "defaultProperties": defaults
         ]
     }
 

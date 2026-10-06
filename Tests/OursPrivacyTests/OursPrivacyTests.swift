@@ -528,6 +528,20 @@ final class OursPrivacyTests: XCTestCase {
         OursPrivacyPersistence.deleteUserDefaultsData(instanceName: name)
     }
 
+    func testLegacyArrayQueueIsReadableAndCanAcceptNewItems() {
+        let name = "legacy-queue-\(UUID().uuidString)"
+        let key = "oursprivacy-\(name)-OPEventQueue"
+        let defaults = UserDefaults(suiteName: OursPrivacyUserDefaultsKeys.suiteName)
+        defaults?.set(JSONHandler.serializeJSONObject([makeEntity("Before")]), forKey: key)
+        let migrated = OursPrivacyPersistence(instanceName: name)
+        XCTAssertEqual(migrated.loadEntitiesInBatch(type: .events).first?["event"] as? String, "Before")
+        XCTAssertTrue(migrated.saveEntity(makeEntity("After"), type: .events))
+        let restarted = OursPrivacyPersistence(instanceName: name)
+        XCTAssertEqual(restarted.loadEntitiesInBatch(type: .events).compactMap { $0["event"] as? String },
+                       ["Before", "After"])
+        OursPrivacyPersistence.deleteUserDefaultsData(instanceName: name)
+    }
+
     func testResetEntitiesClearsQueue() {
         let p = makePersistence()
         p.saveEntity(makeEntity("A"), type: .events)
@@ -617,6 +631,294 @@ final class OursPrivacyTests: XCTestCase {
 
         await op.initialize(options: OursPrivacyInitOptions(optedOutByDefault: true))
         XCTAssertFalse(op.hasOptedOutTracking())
+    }
+
+    private func makeMobileInstance(name: String = "mobile-\(UUID().uuidString)") -> OursPrivacy {
+        let op = OursPrivacy(token: name, trackAutomaticEvents: true)
+        op.mobileSession = MobileSession(instanceName: name)
+        op.mobileRuntimeEnabled = true
+        return op
+    }
+
+    private func mobilePoint(_ elapsed: Int64 = 0) -> MobileTimePoint {
+        let now = Int64(Date().timeIntervalSince1970 * 1_000)
+        return MobileTimePoint(epochMs: now + elapsed, monotonicMs: elapsed)
+    }
+
+    func testInitialLinkPrecedesCanonicalOpenAndManualBookingKeepsCallerFields() async {
+        let op = makeMobileInstance()
+        let openedAt = mobilePoint()
+        op.mobileForeground(at: openedAt)
+        await op.initialize(options: OursPrivacyInitOptions(
+            initialURL: "https://example.test/?ours_visitor_id=stitched-ios&utm_source=campaign",
+            defaultEventProperties: ["caller_field": "event"],
+            defaultUserCustomProperties: ["patient_field": "private"]))
+        op.track(event: "appointment_booked", properties: ["appointment_id": "visit-1"])
+        op.trackingQueue.sync {}
+
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let canonical = items.filter { ($0["event"] as? String)?.hasPrefix("$mobile_") == true }
+        XCTAssertEqual(canonical.compactMap { $0["event"] as? String },
+                       ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start"])
+        let booked = items.first { $0["event"] as? String == "appointment_booked" }
+        let sid = (canonical.first?["defaultProperties"] as? [String: Any])?["sid"] as? String
+        XCTAssertNotNil(sid)
+        XCTAssertEqual((booked?["defaultProperties"] as? [String: Any])?["sid"] as? String, sid)
+        let timestampPattern = #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$"#
+        for item in canonical + (booked.map { [$0] } ?? []) {
+            XCTAssertEqual(item["visitor_id"] as? String, "stitched-ios")
+            XCTAssertNil(item["time"])
+            let defaults = item["defaultProperties"] as? [String: Any]
+            XCTAssertEqual(defaults?["mobile_platform"] as? String, "ios")
+            XCTAssertEqual(defaults?["mobile_contract_version"] as? Int, 1)
+            XCTAssertNotNil((defaults?["mobile_occurred_at"] as? String)?
+                .range(of: timestampPattern, options: .regularExpression))
+            XCTAssertNotNil((defaults?["mobile_session_started_at"] as? String)?
+                .range(of: timestampPattern, options: .regularExpression))
+            XCTAssertEqual(defaults?["version"] as? String, "swift@3.0.0")
+            if let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
+                XCTAssertEqual(defaults?["app_version"] as? String, appVersion)
+            }
+            if let appBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String {
+                XCTAssertEqual(defaults?["app_build"] as? String, appBuild)
+            }
+        }
+        for item in canonical {
+            XCTAssertTrue(item["userProperties"] is NSNull)
+            XCTAssertTrue(item["eventProperties"] is NSNull)
+            XCTAssertNil((item["defaultProperties"] as? [String: Any])?["utm_source"])
+        }
+        XCTAssertEqual((booked?["eventProperties"] as? [String: Any])?["caller_field"] as? String, "event")
+        XCTAssertEqual(((booked?["userProperties"] as? [String: Any])?["custom_properties"] as?
+                        [String: Any])?["patient_field"] as? String, "private")
+        XCTAssertEqual((booked?["defaultProperties"] as? [String: Any])?["utm_source"] as? String, "campaign")
+    }
+
+    func testMobileEngagementUsesCallbackTimeAndDuplicateForegroundIsIgnored() async {
+        let op = makeMobileInstance()
+        await op.initialize()
+        let start = mobilePoint()
+        op.mobileForeground(at: start)
+        op.mobileForeground(at: MobileTimePoint(epochMs: start.epochMs + 1_000, monotonicMs: 1_000))
+        op.mobileQueueNowMs = { start.epochMs + 10_000 }
+        op.mobileBackground(at: MobileTimePoint(epochMs: start.epochMs + 10_000, monotonicMs: 10_000))
+        op.trackingQueue.sync {}
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(items.filter { $0["event"] as? String == "$mobile_app_open" }.count, 1)
+        let engagement = items.first { $0["event"] as? String == "$mobile_session_engagement" }
+        XCTAssertEqual((engagement?["eventProperties"] as? [String: Any])?["engagement_duration_ms"] as? Int64,
+                       10_000)
+    }
+
+    func testManualMobileEventHasSessionWithAutomaticEventsOff() async {
+        let op = makeMobileInstance()
+        op.trackAutomaticEventsEnabled = false
+        await op.initialize()
+        op.track(event: "appointment_booked")
+        op.identify(OursPrivacyUserProperties(externalId: "external-1"))
+        op.trackingQueue.sync {}
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(items.count, 2)
+        XCTAssertNotNil((items[0]["defaultProperties"] as? [String: Any])?["sid"] as? String)
+        XCTAssertEqual((items[1]["defaultProperties"] as? [String: Any])?["sid"] as? String,
+                       (items[0]["defaultProperties"] as? [String: Any])?["sid"] as? String)
+        XCTAssertEqual((items[1]["defaultProperties"] as? [String: Any])?["mobile_platform"] as? String, "ios")
+    }
+
+    func testAcceptedFirstOpenSurvivesQueueRemovalAndOptOutRestart() async {
+        let name = "mobile-\(UUID().uuidString)"
+        let first = makeMobileInstance(name: name)
+        await first.initialize()
+        first.mobileForeground(at: mobilePoint())
+        first.trackingQueue.sync {}
+        let queued = first.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(queued.filter { $0["event"] as? String == "$mobile_first_open" }.count, 1)
+        first.oursprivacyPersistence.removeEntitiesInBatch(
+            type: .events, ids: queued.compactMap { $0["id"] as? Int32 })
+        first.optOutTracking()
+        first.trackingQueue.sync {}
+        let second = makeMobileInstance(name: name)
+        await second.initialize()
+        second.optInTracking()
+        second.trackingQueue.sync {}
+        second.mobileForeground(at: mobilePoint())
+        second.trackingQueue.sync {}
+        let replay = second.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertFalse(replay.contains { $0["event"] as? String == "$mobile_first_open" })
+    }
+
+    func testFailedQueueWriteKeepsFirstOpenEligible() async {
+        let op = makeMobileInstance()
+        await op.initialize()
+        op.oursprivacyPersistence.persistenceWrite = { _ in false }
+        op.mobileForeground(at: mobilePoint())
+        op.trackingQueue.sync {}
+        XCTAssertFalse(op.mobileSession?.hasAcceptedFirstOpen ?? true)
+        XCTAssertTrue(op.mobileSession?.pendingFacts.contains {
+            $0.name == "$mobile_first_open"
+        } ?? false)
+    }
+
+    func testFailedFirstOpenWriteHoldsLaterLifecycleFactsUntilRetry() async {
+        let op = makeMobileInstance()
+        await op.initialize()
+        let persist = op.oursprivacyPersistence.persistenceWrite
+        var attempts = 0
+        op.oursprivacyPersistence.persistenceWrite = { data in
+            attempts += 1
+            return attempts == 1 ? false : persist(data)
+        }
+        op.mobileForeground(at: mobilePoint())
+        op.trackingQueue.sync {}
+        XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+        XCTAssertFalse(op.mobileSession?.hasAcceptedFirstOpen ?? true)
+
+        op.track(event: "appointment_booked")
+        op.trackingQueue.sync {}
+        let names = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            .compactMap { $0["event"] as? String }
+        XCTAssertEqual(names, ["$mobile_first_open", "$mobile_app_open",
+                               "$mobile_session_start", "appointment_booked"])
+    }
+
+    func testQueueEvidenceSurvivesMissingSessionAcknowledgmentAndRestart() async {
+        let name = "mobile-\(UUID().uuidString)"
+        let session = MobileSession(instanceName: name)
+        let first = session.foreground(automaticEnabled: true, visitorId: "original-visitor",
+                                       appVersion: "2.0", appBuild: "42", at: mobilePoint())[0]
+        let persistence = OursPrivacyPersistence(instanceName: name)
+        XCTAssertTrue(persistence.saveEntity(Track().composeMobileFact(first), type: .events,
+                                             firstOpen: true))
+        XCTAssertFalse(session.hasAcceptedFirstOpen)
+        let sent = persistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(sent.first?["visitor_id"] as? String, "original-visitor")
+        XCTAssertEqual((sent.first?["defaultProperties"] as? [String: Any])?["app_version"] as? String, "2.0")
+        persistence.removeEntitiesInBatch(type: .events,
+                                          ids: sent.compactMap { $0["id"] as? Int32 })
+
+        let restarted = makeMobileInstance(name: name)
+        await restarted.initialize()
+        restarted.optOutTracking()
+        restarted.trackingQueue.sync {}
+        restarted.optInTracking()
+        restarted.trackingQueue.sync {}
+        restarted.mobileForeground(at: mobilePoint())
+        restarted.trackingQueue.sync {}
+        let replay = restarted.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertFalse(replay.contains { $0["event"] as? String == "$mobile_first_open" })
+        XCTAssertTrue(restarted.mobileSession?.hasAcceptedFirstOpen ?? false)
+    }
+
+    func testResetDropsUnqueuedOldIdentityFactsAndKeepsFirstOpenEligible() async {
+        let op = makeMobileInstance()
+        await op.initialize()
+        let persist = op.oursprivacyPersistence.persistenceWrite
+        op.oursprivacyPersistence.persistenceWrite = { _ in false }
+        op.mobileForeground(at: mobilePoint())
+        op.trackingQueue.sync {}
+        let originalFirstOpen = op.mobileSession?.pendingFacts.first {
+            $0.name == "$mobile_first_open"
+        }?.distinctId
+        XCTAssertNotNil(originalFirstOpen)
+
+        op.reset()
+        op.trackingQueue.sync {}
+        op.oursprivacyPersistence.persistenceWrite = persist
+        op.track(event: "appointment_booked")
+        op.trackingQueue.sync {}
+        let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertFalse(events.contains { $0["distinct_id"] as? String == originalFirstOpen })
+        XCTAssertFalse(op.mobileSession?.hasAcceptedFirstOpen ?? true)
+        let booked = events.first { $0["event"] as? String == "appointment_booked" }
+        XCTAssertNotNil((booked?["defaultProperties"] as? [String: Any])?["sid"] as? String)
+    }
+
+    func testFuturePendingFactsWaitUntilTheirOccurrenceTime() async {
+        let name = "mobile-\(UUID().uuidString)"
+        let op = makeMobileInstance(name: name)
+        let now = Int64(Date().timeIntervalSince1970 * 1_000)
+        let future = MobileTimePoint(epochMs: now + 60_000, monotonicMs: 0)
+        _ = op.mobileSession?.foreground(automaticEnabled: true, visitorId: "visitor-a", at: future)
+        op.mobileQueueNowMs = { now }
+        await op.initialize()
+        XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+        op.mobileQueueNowMs = { now + 59_999 }
+        op.mobileForeground(at: future)
+        op.trackingQueue.sync {}
+        XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+
+        op.mobileQueueNowMs = { now + 60_000 }
+        op.mobileForeground(at: future)
+        op.trackingQueue.sync {}
+        let accepted = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(accepted.filter { $0["event"] as? String == "$mobile_first_open" }.count, 1)
+        XCTAssertEqual(accepted.first?["visitor_id"] as? String, "visitor-a")
+    }
+
+    func testOptOutClearsCanonicalAndManualQueueBeforeNextTracking() async {
+        let op = makeMobileInstance()
+        await op.initialize()
+        op.mobileForeground(at: mobilePoint())
+        op.track(event: "appointment_booked")
+        op.trackingQueue.sync {}
+        XCTAssertGreaterThan(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).count, 1)
+
+        op.optOutTracking()
+        op.trackingQueue.sync {}
+        op.mobileBackground(at: mobilePoint(10_000))
+        op.track(event: "appointment_booked")
+        op.trackingQueue.sync {}
+        XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+        XCTAssertTrue(op.mobileSession?.pendingFacts.isEmpty ?? false)
+    }
+
+    func testResetRotatesManualSessionAndPreservesFirstOpenEvidence() async {
+        let op = makeMobileInstance()
+        await op.initialize()
+        op.mobileForeground(at: mobilePoint())
+        op.track(event: "appointment_booked")
+        op.trackingQueue.sync {}
+        let first = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let firstSid = (first.last?["defaultProperties"] as? [String: Any])?["sid"] as? String
+        XCTAssertNotNil(firstSid)
+
+        op.reset()
+        op.trackingQueue.sync {}
+        op.track(event: "appointment_booked")
+        op.trackingQueue.sync {}
+        let later = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let laterSid = (later.last?["defaultProperties"] as? [String: Any])?["sid"] as? String
+        XCTAssertNotNil(laterSid)
+        XCTAssertNotEqual(firstSid, laterSid)
+        XCTAssertTrue(op.oursprivacyPersistence.hasFirstOpenQueueEvidence)
+        XCTAssertFalse(later.contains { $0["event"] as? String == "$mobile_app_open" })
+    }
+
+    func testPendingFirstOpenKeepsOriginalVisitorAfterIdentityChange() async {
+        let op = makeMobileInstance()
+        await op.initialize()
+        let originalVisitor = op.visitorId
+        let persist = op.oursprivacyPersistence.persistenceWrite
+        op.oursprivacyPersistence.persistenceWrite = { _ in false }
+        op.mobileForeground(at: mobilePoint())
+        op.trackingQueue.sync {}
+        let pending = op.mobileSession?.pendingFacts.first { $0.name == "$mobile_first_open" }
+        XCTAssertNotNil(pending)
+
+        op.oursprivacyPersistence.persistenceWrite = persist
+        op.setVisitorId("new-visitor")
+        op.track(event: "appointment_booked")
+        op.trackingQueue.sync {}
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let firstOpen = items.first { $0["event"] as? String == "$mobile_first_open" }
+        let booked = items.first { $0["event"] as? String == "appointment_booked" }
+        XCTAssertEqual(firstOpen?["distinct_id"] as? String, pending?.distinctId)
+        XCTAssertEqual(firstOpen?["visitor_id"] as? String, originalVisitor)
+        XCTAssertEqual((firstOpen?["defaultProperties"] as? [String: Any])?["sid"] as? String,
+                       pending?.sid)
+        XCTAssertEqual(booked?["visitor_id"] as? String, "new-visitor")
+        XCTAssertNotEqual((booked?["defaultProperties"] as? [String: Any])?["sid"] as? String,
+                          pending?.sid)
     }
 
     func testWipeLegacySQLiteFileIfPresent() {

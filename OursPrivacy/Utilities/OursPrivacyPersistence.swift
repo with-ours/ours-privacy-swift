@@ -55,9 +55,18 @@ class OursPrivacyPersistence {
     private let queueLock = ReadWriteLock(label: "com.oursprivacy.persistence.queue")
     private var inMemoryQueue: [InternalProperties] = []
     private var nextId: Int32 = 1
+    private var firstOpenQueueEvidence = false
+    var persistenceWrite: (Data) -> Bool
 
     init(instanceName: String) {
         self.instanceName = instanceName
+        let defaults = UserDefaults(suiteName: OursPrivacyUserDefaultsKeys.suiteName)
+        let key = "\(OursPrivacyUserDefaultsKeys.prefix)-\(instanceName)-\(OursPrivacyUserDefaultsKeys.eventQueue)"
+        persistenceWrite = { data in
+            guard let defaults else { return false }
+            defaults.set(data, forKey: key)
+            return defaults.synchronize() && defaults.data(forKey: key) == data
+        }
         loadQueueFromDefaults()
     }
 
@@ -67,15 +76,23 @@ class OursPrivacyPersistence {
     /// implementation. The in-memory queue has no connection to close.
     func closeDB() {}
 
-    func saveEntity(_ entity: InternalProperties, type: PersistenceType, flag: Bool = false) {
-        guard type == .events else { return }
+    @discardableResult
+    func saveEntity(_ entity: InternalProperties, type: PersistenceType, flag: Bool = false,
+                    firstOpen: Bool = false) -> Bool {
+        guard type == .events else { return false }
+        var saved = false
         queueLock.write {
             var item = entity
             item["id"] = nextId
-            nextId &+= 1
-            inMemoryQueue.append(item)
+            let proposal = inMemoryQueue + [item]
+            if persistQueueToDefaults(proposal, firstOpenAccepted: firstOpenQueueEvidence || firstOpen) {
+                inMemoryQueue = proposal
+                nextId &+= 1
+                firstOpenQueueEvidence = firstOpenQueueEvidence || firstOpen
+                saved = true
+            }
         }
-        persistQueueToDefaults()
+        return saved
     }
 
     func saveEntities(_ entities: Queue, type: PersistenceType, flag: Bool = false) {
@@ -102,22 +119,32 @@ class OursPrivacyPersistence {
         guard type == .events else { return }
         let toRemove = Set(ids)
         queueLock.write {
-            inMemoryQueue.removeAll { item in
+            var proposal = inMemoryQueue
+            proposal.removeAll { item in
                 guard let id = (item["id"] as? Int32) ?? (item["id"] as? NSNumber)?.int32Value else {
                     return false
                 }
                 return toRemove.contains(id)
             }
+            if persistQueueToDefaults(proposal, firstOpenAccepted: firstOpenQueueEvidence) {
+                inMemoryQueue = proposal
+            }
         }
-        persistQueueToDefaults()
     }
 
     func resetEntities() {
         queueLock.write {
-            inMemoryQueue.removeAll()
-            nextId = 1
+            if persistQueueToDefaults([], firstOpenAccepted: firstOpenQueueEvidence) {
+                inMemoryQueue.removeAll()
+                nextId = 1
+            }
         }
-        persistQueueToDefaults()
+    }
+
+    var hasFirstOpenQueueEvidence: Bool {
+        var result = false
+        queueLock.read { result = firstOpenQueueEvidence }
+        return result
     }
 
     // MARK: - Queue (de)serialization
@@ -132,7 +159,17 @@ class OursPrivacyPersistence {
             return
         }
         guard let data = defaults.data(forKey: queueKey()) else { return }
-        guard let array = JSONHandler.deserializeData(data) as? [InternalProperties] else { return }
+        let decoded = JSONHandler.deserializeData(data)
+        let array: [InternalProperties]
+        if let legacy = decoded as? [InternalProperties] {
+            array = legacy
+        } else if let blob = decoded as? [String: Any],
+                  let events = blob["events"] as? [InternalProperties] {
+            array = events
+            firstOpenQueueEvidence = blob["firstOpenAccepted"] as? Bool ?? false
+        } else {
+            return
+        }
 
         queueLock.write {
             inMemoryQueue = array
@@ -145,21 +182,13 @@ class OursPrivacyPersistence {
         }
     }
 
-    private func persistQueueToDefaults() {
-        guard let defaults = UserDefaults(suiteName: OursPrivacyUserDefaultsKeys.suiteName) else {
-            return
-        }
-        var snapshot: [InternalProperties] = []
-        queueLock.read { snapshot = inMemoryQueue }
-        if snapshot.isEmpty {
-            defaults.removeObject(forKey: queueKey())
-            return
-        }
-        guard let data = JSONHandler.serializeJSONObject(snapshot) else {
+    private func persistQueueToDefaults(_ events: [InternalProperties], firstOpenAccepted: Bool) -> Bool {
+        let blob: [String: Any] = ["events": events, "firstOpenAccepted": firstOpenAccepted]
+        guard let data = JSONHandler.serializeJSONObject(blob) else {
             OursPrivacyLogger.warn(message: "failed to serialize event queue for persistence")
-            return
+            return false
         }
-        defaults.set(data, forKey: queueKey())
+        return persistenceWrite(data)
     }
 
     // MARK: - One-shot legacy cleanup
@@ -255,7 +284,7 @@ class OursPrivacyPersistence {
         return OursPrivacyIdentity(visitorId: visitorId, isManuallySetId: isManuallySetId)
     }
 
-    static func deleteUserDefaultsData(instanceName: String) {
+    static func deleteUserDefaultsData(instanceName: String, preserveEventQueue: Bool = false) {
         guard let defaults = UserDefaults(suiteName: OursPrivacyUserDefaultsKeys.suiteName) else {
             return
         }
@@ -263,7 +292,9 @@ class OursPrivacyPersistence {
         defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.visitorId)")
         defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.isManuallySetId)")
         defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.optOutStatus)")
-        defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.eventQueue)")
+        if !preserveEventQueue {
+            defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.eventQueue)")
+        }
         defaults.synchronize()
     }
 }

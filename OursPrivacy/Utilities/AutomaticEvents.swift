@@ -12,6 +12,8 @@ protocol AEDelegate: AnyObject {
     func track(event: String?, properties: Properties?, userProperties: Properties?)
     func setOnce(properties: Properties)
     func increment(property: String, by: Double)
+    func mobileForeground(at point: MobileTimePoint)
+    func mobileBackground(at point: MobileTimePoint)
 }
 
 #if os(iOS) || os(tvOS) || os(visionOS)
@@ -53,6 +55,19 @@ class AutomaticEvents: NSObject, SKPaymentTransactionObserver, SKProductsRequest
                                                        qos: .userInitiated,
                                                        autoreleaseFrequency: .workItem)
 
+    func registerLifecycleListeners() {
+        guard !hasAddedObserver else { return }
+        hasAddedObserver = true
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(appWillResignActive(_:)),
+                                               name: UIApplication.willResignActiveNotification,
+                                               object: nil)
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(appDidBecomeActive(_:)),
+                                               name: UIApplication.didBecomeActiveNotification,
+                                               object: nil)
+    }
+
     func initializeEvents(instanceName: String) {
         let legacyFirstOpenKey = "OPFirstOpen"
         let firstOpenKey = "OPFirstOpen-\(instanceName)"
@@ -82,20 +97,13 @@ class AutomaticEvents: NSObject, SKPaymentTransactionObserver, SKProductsRequest
             }
         }
 
-        NotificationCenter.default.addObserver(self,
-                                               selector: #selector(appWillResignActive(_:)),
-                                               name: UIApplication.willResignActiveNotification,
-                                               object: nil)
-
-        NotificationCenter.default.addObserver(self,
-                                               selector: #selector(appDidBecomeActive(_:)),
-                                               name: UIApplication.didBecomeActiveNotification,
-                                               object: nil)
-
+        registerLifecycleListeners()
         SKPaymentQueue.default().add(self)
     }
 
     @objc func appWillResignActive(_ notification: Notification) {
+        let point = MobileTimePoint.capture()
+        delegate?.mobileBackground(at: point)
         sessionLength = roundOneDigit(num: Date().timeIntervalSince1970 - sessionStartTime)
         if sessionLength >= Double(minimumSessionDuration / 1000) &&
             sessionLength <= Double(maximumSessionDuration / 1000) {
@@ -106,6 +114,8 @@ class AutomaticEvents: NSObject, SKPaymentTransactionObserver, SKProductsRequest
     }
 
     @objc func appDidBecomeActive(_ notification: Notification) {
+        let point = MobileTimePoint.capture()
+        delegate?.mobileForeground(at: point)
         sessionStartTime = Date().timeIntervalSince1970
     }
 
