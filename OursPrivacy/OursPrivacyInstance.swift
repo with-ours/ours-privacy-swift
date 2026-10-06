@@ -72,9 +72,9 @@ private struct PersistedEventTransfer: @unchecked Sendable {
     let value: Queue
 }
 
-private struct PendingOptIn {
-    var identify: InternalProperties?
+private struct PendingTrackingItem {
     let event: InternalProperties
+    let completion: (@Sendable () -> Void)?
 }
 
 protocol AppLifecycle {
@@ -258,7 +258,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
     private var deferredMobileForeground: MobileTimePoint?
     private var mobileCheckpointTimer: DispatchSourceTimer?
     private var mobilePendingRetryTimer: DispatchSourceTimer?
-    private var pendingOptIns: [PendingOptIn] = []
+    private var pendingTrackingItems: [PendingTrackingItem] = []
 
     let readWriteLock: ReadWriteLock
 #if !os(OSX) && !os(watchOS)
@@ -517,7 +517,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
     }
 
     private func queuePendingMobileFacts() {
-        defer { drainPendingOptIns() }
+        defer { drainPendingTrackingItems() }
         guard mobileRuntimeEnabled, !hasOptedOutTracking(),
               !oursprivacyPersistence.hasPendingPrivacyClear, let mobileSession else { return }
         let queued = oursprivacyPersistence.loadEntitiesInBatch(type: .events)
@@ -553,8 +553,8 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
         }
     }
 
-    private func drainPendingOptIns() {
-        guard !pendingOptIns.isEmpty, !hasOptedOutTracking(),
+    private func drainPendingTrackingItems() {
+        guard !pendingTrackingItems.isEmpty, !hasOptedOutTracking(),
               !oursprivacyPersistence.hasPendingPrivacyClear else { return }
         let now = mobileQueueNowMs()
         let dueOpenPending = mobileSession?.pendingFacts.contains {
@@ -563,19 +563,15 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
         } ?? false
         guard !dueOpenPending else { return }
 
-        while !pendingOptIns.isEmpty {
-            if let identify = pendingOptIns[0].identify {
-                guard oursprivacyPersistence.saveEntity(identify, type: .events) else {
-                    scheduleMobilePendingRetry(after: max(1, mobilePendingRetryIntervalMs))
-                    return
-                }
-                pendingOptIns[0].identify = nil
-            }
-            guard oursprivacyPersistence.saveEntity(pendingOptIns[0].event, type: .events) else {
+        while let pending = pendingTrackingItems.first {
+            guard oursprivacyPersistence.saveEntity(pending.event, type: .events) else {
                 scheduleMobilePendingRetry(after: max(1, mobilePendingRetryIntervalMs))
                 return
             }
-            pendingOptIns.removeFirst()
+            pendingTrackingItems.removeFirst()
+            if let completion = pending.completion {
+                DispatchQueue.main.async(execute: completion)
+            }
         }
     }
 
@@ -879,15 +875,20 @@ extension OursPrivacy {
             guard let self = self else { return }
             guard !self.hasOptedOutTracking() else { return }
             guard self.clearPrivacyQueueIfNeeded() else { return }
+            let wasHeld = !self.pendingTrackingItems.isEmpty
             self.queuePendingMobileFacts()
             let context = self.currentEventContext(at: point)
             let item = self.trackInstance.composeIdentifyEvent(userProperties: snapshot.decode(),
                                                                context: context)
-            self.oursprivacyPersistence.saveEntity(item, type: .events)
-            self.queuePendingMobileFacts()
-            if let completion = completion {
-                DispatchQueue.main.async(execute: completion)
+            if !wasHeld && self.pendingTrackingItems.isEmpty {
+                self.oursprivacyPersistence.saveEntity(item, type: .events)
+                if let completion {
+                    DispatchQueue.main.async(execute: completion)
+                }
+            } else {
+                self.pendingTrackingItems.append(PendingTrackingItem(event: item, completion: completion))
             }
+            self.queuePendingMobileFacts()
         }
 
         if OursPrivacy.isiOSAppExtension() {
@@ -903,7 +904,7 @@ extension OursPrivacy {
             guard let self = self else { return }
             self.mobilePendingRetryTimer?.cancel()
             self.mobilePendingRetryTimer = nil
-            self.pendingOptIns.removeAll()
+            self.pendingTrackingItems.removeAll()
             let nextVisitorId = self.newVisitorId()
             if self.mobileRuntimeEnabled, let mobileSession = self.mobileSession {
                 _ = mobileSession.rotate(to: nextVisitorId,
@@ -1167,6 +1168,7 @@ extension OursPrivacy {
                 return
             }
             guard self.clearPrivacyQueueIfNeeded() else { return }
+            let wasHeld = !self.pendingTrackingItems.isEmpty
             self.queuePendingMobileFacts()
             let context = self.currentEventContext(at: point)
             let item = self.trackInstance.composeTrackEvent(event: event,
@@ -1174,7 +1176,11 @@ extension OursPrivacy {
                                                             userProperties: capturedUserProperties.decode(),
                                                             context: context)
             if item.isEmpty { return }
-            self.oursprivacyPersistence.saveEntity(item, type: .events)
+            if !wasHeld && self.pendingTrackingItems.isEmpty {
+                self.oursprivacyPersistence.saveEntity(item, type: .events)
+            } else {
+                self.pendingTrackingItems.append(PendingTrackingItem(event: item, completion: nil))
+            }
             self.queuePendingMobileFacts()
         }
 
@@ -1199,7 +1205,7 @@ extension OursPrivacy {
             self.mobileCheckpointTimer = nil
             self.mobilePendingRetryTimer?.cancel()
             self.mobilePendingRetryTimer = nil
-            self.pendingOptIns.removeAll()
+            self.pendingTrackingItems.removeAll()
             self.readWriteLock.write {
                 self.optOutStatus = true
             }
@@ -1255,7 +1261,10 @@ extension OursPrivacy {
             let event = self.trackInstance.composeTrackEvent(event: "$opt_in",
                                                              eventProperties: capturedProperties.decode(),
                                                              userProperties: nil, context: context)
-            self.pendingOptIns.append(PendingOptIn(identify: identify, event: event))
+            if let identify {
+                self.pendingTrackingItems.append(PendingTrackingItem(event: identify, completion: nil))
+            }
+            self.pendingTrackingItems.append(PendingTrackingItem(event: event, completion: nil))
             self.queuePendingMobileFacts()
         }
         if OursPrivacy.isiOSAppExtension() {
