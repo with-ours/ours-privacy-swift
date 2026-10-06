@@ -12,8 +12,6 @@ protocol AEDelegate: AnyObject {
     func track(event: String?, properties: Properties?, userProperties: Properties?)
     func setOnce(properties: Properties)
     func increment(property: String, by: Double)
-    func mobileForeground(at point: MobileTimePoint)
-    func mobileBackground(at point: MobileTimePoint)
 }
 
 #if os(iOS) || os(tvOS) || os(visionOS)
@@ -21,7 +19,6 @@ import Foundation
 import UIKit
 import StoreKit
 
-// StoreKit purchase state uses awaitingTransactionsWriteLock; lifecycle callbacks update session state on the main queue.
 class AutomaticEvents: NSObject, SKPaymentTransactionObserver, SKProductsRequestDelegate, @unchecked Sendable {
 
     var _minimumSessionDuration: UInt64 = 10000
@@ -50,11 +47,26 @@ class AutomaticEvents: NSObject, SKPaymentTransactionObserver, SKProductsRequest
     var sessionLength: TimeInterval = 0
     var sessionStartTime: TimeInterval = Date().timeIntervalSince1970
     var hasAddedObserver = false
-    var hasAddedPurchaseObserver = false
+    private let purchaseStateLock = NSLock()
+    private var purchaseObserverAdded = false
+    private var purchaseGeneration: UInt64 = 0
+    var hasAddedPurchaseObserver: Bool {
+        withPurchaseStateLock { purchaseObserverAdded }
+    }
 
     let awaitingTransactionsWriteLock = DispatchQueue(label: "com.oursprivacy.awaiting_transactions_writeLock",
                                                        qos: .userInitiated,
                                                        autoreleaseFrequency: .workItem)
+
+    private func withPurchaseStateLock<T>(_ body: () -> T) -> T {
+        purchaseStateLock.lock()
+        defer { purchaseStateLock.unlock() }
+        return body()
+    }
+
+    private func activePurchaseGeneration() -> UInt64? {
+        withPurchaseStateLock { purchaseObserverAdded ? purchaseGeneration : nil }
+    }
 
     func registerLifecycleListeners() {
         guard !hasAddedObserver else { return }
@@ -102,20 +114,36 @@ class AutomaticEvents: NSObject, SKPaymentTransactionObserver, SKProductsRequest
     }
 
     func registerPurchaseObserver() {
-        guard !hasAddedPurchaseObserver else { return }
-        hasAddedPurchaseObserver = true
+        let shouldRegister = withPurchaseStateLock {
+            guard !purchaseObserverAdded else { return false }
+            purchaseObserverAdded = true
+            purchaseGeneration &+= 1
+            return true
+        }
+        guard shouldRegister else { return }
         SKPaymentQueue.default().add(self)
     }
 
     func unregisterPurchaseObserver() {
-        guard hasAddedPurchaseObserver else { return }
-        SKPaymentQueue.default().remove(self)
-        hasAddedPurchaseObserver = false
+        let wasRegistered = withPurchaseStateLock {
+            let result = purchaseObserverAdded
+            purchaseObserverAdded = false
+            purchaseGeneration &+= 1
+            return result
+        }
+        let requests = awaitingTransactionsWriteLock.sync {
+            awaitingTransactions.removeAll()
+            let pending = Array(productsRequests.values)
+            productsRequests.removeAll()
+            return pending
+        }
+        for request in requests { request.cancel() }
+        if wasRegistered {
+            SKPaymentQueue.default().remove(self)
+        }
     }
 
     @objc func appWillResignActive(_ notification: Notification) {
-        let point = MobileTimePoint.capture()
-        delegate?.mobileBackground(at: point)
         sessionLength = roundOneDigit(num: Date().timeIntervalSince1970 - sessionStartTime)
         if sessionLength >= Double(minimumSessionDuration / 1000) &&
             sessionLength <= Double(maximumSessionDuration / 1000) {
@@ -126,18 +154,17 @@ class AutomaticEvents: NSObject, SKPaymentTransactionObserver, SKProductsRequest
     }
 
     @objc func appDidBecomeActive(_ notification: Notification) {
-        let point = MobileTimePoint.capture()
-        delegate?.mobileForeground(at: point)
         sessionStartTime = Date().timeIntervalSince1970
     }
 
     func paymentQueue(_ queue: SKPaymentQueue, updatedTransactions transactions: [SKPaymentTransaction]) {
-        guard hasAddedPurchaseObserver else { return }
+        guard let generation = activePurchaseGeneration() else { return }
         let purchased = transactions.compactMap { transaction -> (String, Int)? in
             guard transaction.transactionState == .purchased else { return nil }
             return (transaction.payment.productIdentifier, transaction.payment.quantity)
         }
         awaitingTransactionsWriteLock.async { [self] in
+            guard activePurchaseGeneration() == generation else { return }
             for (identifier, quantity) in purchased {
                 awaitingTransactions[identifier] = quantity
             }
@@ -163,16 +190,21 @@ class AutomaticEvents: NSObject, SKPaymentTransactionObserver, SKProductsRequest
     }
 
     func productsRequest(_ request: SKProductsRequest, didReceive response: SKProductsResponse) {
+        completeProductsRequest(request,
+                                products: response.products.map { ($0.productIdentifier, "\($0.price)") })
+    }
+
+    func completeProductsRequest(_ request: SKProductsRequest, products: [(String, String)]) {
         let requestID = ObjectIdentifier(request)
-        let products = response.products.map { ($0.productIdentifier, "\($0.price)") }
         awaitingTransactionsWriteLock.async { [self] in
+            guard productsRequests.removeValue(forKey: requestID) != nil,
+                  hasAddedPurchaseObserver else { return }
             for (identifier, price) in products {
                 if let quantity = awaitingTransactions[identifier] {
                     emitPurchasedProduct(identifier: identifier, quantity: quantity, price: price)
                     awaitingTransactions.removeValue(forKey: identifier)
                 }
             }
-            productsRequests.removeValue(forKey: requestID)
         }
     }
 

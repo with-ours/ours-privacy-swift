@@ -860,6 +860,26 @@ final class OursPrivacyTests: XCTestCase {
         XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
     }
 
+#if os(macOS) || os(tvOS) || os(visionOS) || os(watchOS)
+    func testTrackScreenSkipsCanonicalEventOutsideIOSWhileOrdinaryTrackWorks() async {
+        let op = makeInstance()
+        XCTAssertFalse(op.mobileRuntimeEnabled)
+        op.updateDefaultEventProperties(["patient_field": "caller-controlled"])
+        await op.initialize()
+
+        op.trackScreen("Schedule")
+        op.track(event: "appointment_booked", properties: ["appointment_id": "booking-1"])
+        op.trackingQueue.sync {}
+
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(items.compactMap { $0["event"] as? String }, ["appointment_booked"])
+        XCTAssertEqual((items.first?["eventProperties"] as? [String: Any])?["appointment_id"] as? String,
+                       "booking-1")
+        XCTAssertEqual((items.first?["eventProperties"] as? [String: Any])?["patient_field"] as? String,
+                       "caller-controlled")
+    }
+#endif
+
     func testAutomaticPurchaseOptionDefaultsOffAndOverridesLifecycle() async {
         let defaultOff = OursPrivacy(token: "purchases-\(UUID().uuidString)", trackAutomaticEvents: true)
         XCTAssertFalse(defaultOff.trackAutomaticPurchasesEnabled)

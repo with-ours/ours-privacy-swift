@@ -405,10 +405,16 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
 #endif
 
     @objc private func applicationDidBecomeActive(_ notification: Notification) {
+        if mobileRuntimeEnabled {
+            mobileForeground(at: captureMobileTime())
+        }
         flushInstance.applicationDidBecomeActive()
     }
 
     @objc private func applicationWillResignActive(_ notification: Notification) {
+        if mobileRuntimeEnabled {
+            mobileBackground(at: captureMobileTime())
+        }
         flushInstance.applicationWillResignActive()
 #if os(OSX)
         if flushOnBackground {
@@ -988,28 +994,20 @@ extension OursPrivacy {
 extension OursPrivacy {
     // MARK: - Track
 
-    /// Records a stable screen transition as `$mobile_screen_view`. Use fixed
-    /// developer-chosen labels for custom UIKit or SwiftUI navigation; never pass
-    /// titles, URLs, route parameters, or patient data.
+    /// Records an iOS app screen as `$mobile_screen_view`; other runtimes ignore it.
+    /// Use fixed labels, never titles, URLs, route parameters, or patient data.
     public func trackScreen(_ name: String) {
-        guard MobileSession.isValidScreenName(name) else { return }
+        guard mobileRuntimeEnabled, MobileSession.isValidScreenName(name) else { return }
         let point = captureMobileTime()
         trackingQueue.async { [weak self] in
             guard let self, !self.hasOptedOutTracking(),
-                  self.clearPrivacyQueueIfNeeded() else { return }
+                  self.clearPrivacyQueueIfNeeded(),
+                  let mobileSession = self.mobileSession else { return }
             self.queuePendingMobileFacts()
-            if self.mobileRuntimeEnabled, let mobileSession = self.mobileSession {
-                _ = mobileSession.screen(name, visitorId: self.visitorId,
-                                         appVersion: AutomaticProperties.appVersion,
-                                         appBuild: AutomaticProperties.appBuild, at: point)
-                self.queuePendingMobileFacts()
-            } else {
-                let context = self.currentEventContext(at: point)
-                let item = self.trackInstance.composeTrackEvent(
-                    event: "$mobile_screen_view", eventProperties: ["screen_name": name],
-                    userProperties: nil, context: context)
-                self.oursprivacyPersistence.saveEntity(item, type: .events)
-            }
+            _ = mobileSession.screen(name, visitorId: self.visitorId,
+                                     appVersion: AutomaticProperties.appVersion,
+                                     appBuild: AutomaticProperties.appBuild, at: point)
+            self.queuePendingMobileFacts()
         }
     }
 

@@ -214,7 +214,7 @@ op.track(event: "Page View", properties: ["page": "/home", "referrer": "google"]
 
 #### `op.trackScreen(_:)`
 
-Call on each actual screen transition, including custom UIKit navigation and SwiftUI routes. The API emits one `$mobile_screen_view` with `eventProperties.screen_name` for a new label; repeated calls with the active label are suppressed. A screen switch first emits any measured `$mobile_session_engagement` for the previous screen, with `engagement_duration_ms` and that previous `screen_name` (when automatic lifecycle tracking is on). Automatic screen discovery is not complete for custom navigation, so connect your own navigation callback.
+Call on each actual iOS app screen transition, including custom UIKit navigation and SwiftUI routes. The API emits one `$mobile_screen_view` with `eventProperties.screen_name` for a new label; repeated calls with the active label are suppressed. A screen switch first emits any measured `$mobile_session_engagement` for the previous screen, with `engagement_duration_ms` and that previous `screen_name` (when automatic lifecycle tracking is on). Automatic screen discovery is not complete for custom navigation, so connect your own navigation callback. On macOS, tvOS, visionOS, watchOS, and iOS apps running on Mac, `trackScreen` emits no canonical screen event; use ordinary `track(event:)` for supported manual events.
 
 ```swift
 func didShowRoute(_ route: AppRoute) {

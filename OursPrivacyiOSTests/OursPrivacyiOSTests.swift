@@ -7,7 +7,9 @@
 //
 
 import Foundation
+import StoreKit
 import Testing
+import UIKit
 @testable import OursPrivacyKit
 
 private final class LockedTestMobileTime: @unchecked Sendable {
@@ -121,6 +123,48 @@ struct OursPrivacyiOSTests {
         #expect(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
     }
 
+    @Test @MainActor func iosManualScreenReentersAndRotatesAtExactInactivityTimeout() async throws {
+        let op = OursPrivacy(token: "ios-screen-reentry-\(UUID().uuidString)",
+                             trackAutomaticEvents: false)
+        let clock = LockedTestMobileTime(MobileTimePoint.capture())
+        op.captureMobileTime = { clock.capture() }
+        op.mobileQueueNowMs = { clock.capture().epochMs }
+        await op.initialize()
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        op.trackingQueue.sync {}
+
+        op.trackScreen("Schedule")
+        op.trackingQueue.sync {}
+        clock.advance(by: 1_000)
+        NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+        op.trackingQueue.sync {}
+        clock.advance(by: 1_799_999)
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        op.trackingQueue.sync {}
+        op.trackScreen("Schedule")
+        op.trackingQueue.sync {}
+
+        clock.advance(by: 1_000)
+        NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+        op.trackingQueue.sync {}
+        clock.advance(by: 1_800_000)
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        op.trackingQueue.sync {}
+        op.trackScreen("Schedule")
+        op.trackingQueue.sync {}
+
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        #expect(items.compactMap { $0["event"] as? String } ==
+            ["$mobile_screen_view", "$mobile_screen_view", "$mobile_screen_view"])
+        let views = items.filter { $0["event"] as? String == "$mobile_screen_view" }
+        #expect(views.count == 3)
+        let first = try #require(views.first?["defaultProperties"] as? [String: Any])
+        let second = try #require(views.dropFirst().first?["defaultProperties"] as? [String: Any])
+        let third = try #require(views.last?["defaultProperties"] as? [String: Any])
+        #expect(first["sid"] as? String == second["sid"] as? String)
+        #expect(second["sid"] as? String != third["sid"] as? String)
+    }
+
     @Test @MainActor func iosStoreKitRegistrationRequiresSeparatePurchaseOptIn() async {
         let lifecycle = OursPrivacy(token: "ios-purchase-\(UUID().uuidString)",
                                      trackAutomaticEvents: true)
@@ -167,6 +211,45 @@ struct OursPrivacyiOSTests {
         op.trackingQueue.sync {}
         let events = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
         #expect(events.contains { $0["event"] as? String == "$ae_iap" })
+    }
+
+    @Test @MainActor func iosStoreKitIgnoresRequestCompletedAfterOptOutAndOptIn() async {
+        let op = OursPrivacy(token: "ios-purchase-generation-\(UUID().uuidString)",
+                             trackAutomaticEvents: false, trackAutomaticPurchases: true)
+        await op.initialize()
+        let oldRequest = SKProductsRequest(productIdentifiers: ["plan"])
+        op.automaticEvents.awaitingTransactionsWriteLock.sync {
+            op.automaticEvents.awaitingTransactions["plan"] = 1
+            op.automaticEvents.productsRequests[ObjectIdentifier(oldRequest)] = oldRequest
+        }
+
+        op.optOutTracking()
+        op.trackingQueue.sync {}
+        op.optInTracking()
+        op.trackingQueue.sync {}
+
+        let newRequest = SKProductsRequest(productIdentifiers: ["plan"])
+        op.automaticEvents.awaitingTransactionsWriteLock.sync {
+            op.automaticEvents.awaitingTransactions["plan"] = 2
+            op.automaticEvents.productsRequests[ObjectIdentifier(newRequest)] = newRequest
+        }
+        op.automaticEvents.completeProductsRequest(oldRequest, products: [("plan", "12.99")])
+        op.automaticEvents.awaitingTransactionsWriteLock.sync {}
+        op.trackingQueue.sync {}
+
+        let afterOld = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        #expect(afterOld.allSatisfy { $0["event"] as? String != "$ae_iap" })
+
+        op.automaticEvents.completeProductsRequest(newRequest, products: [("plan", "3.99")])
+        op.automaticEvents.awaitingTransactionsWriteLock.sync {}
+        op.trackingQueue.sync {}
+
+        let purchases = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            .filter { $0["event"] as? String == "$ae_iap" }
+        #expect(purchases.count == 1)
+        #expect((purchases.first?["eventProperties"] as? [String: Any])?["$ae_iap_name"] as? String == "plan")
+        #expect((purchases.first?["eventProperties"] as? [String: Any])?["$ae_iap_price"] as? String == "3.99")
+        #expect((purchases.first?["eventProperties"] as? [String: Any])?["$ae_iap_quantity"] as? Int == 2)
     }
 
     @Test @MainActor func foregroundTimerEmitsRepeatedEngagementWithoutBackground() async {
