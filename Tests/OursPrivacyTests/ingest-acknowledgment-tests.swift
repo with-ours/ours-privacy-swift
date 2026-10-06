@@ -3,6 +3,7 @@ import XCTest
 
 private final class ScriptedIngestRequest: FlushRequest, @unchecked Sendable {
     var responses: [IngestBatchResult?]
+    private(set) var sentServerURLs: [String] = []
     let firstStarted = DispatchSemaphore(value: 0)
     let releaseFirst = DispatchSemaphore(value: 0)
     var holdFirst = false
@@ -21,6 +22,7 @@ private final class ScriptedIngestRequest: FlushRequest, @unchecked Sendable {
     override func sendRequest(_ requestData: String, type: FlushType,
                               headers: [String: String], queryItems: [URLQueryItem] = []) -> IngestBatchResult? {
         calls += 1
+        sentServerURLs.append(serverURL)
         if holdFirst && calls == 1 {
             firstStarted.signal()
             _ = releaseFirst.wait(timeout: .now() + 5)
@@ -53,6 +55,87 @@ extension OursPrivacyTests {
 
     private func ingestResult(_ body: String) -> IngestBatchResult? {
         IngestBatchResult.parse(Data(body.utf8))
+    }
+
+    private func seedPersistedRejection(token: String) -> String {
+        let persistence = OursPrivacyPersistence(instanceName: token)
+        XCTAssertTrue(persistence.saveEntity([
+            "event": "booking",
+            "visitor_id": "visitor",
+            "distinct_id": "persisted-event-id",
+            "eventProperties": [:],
+            "userProperties": NSNull(),
+            "defaultProperties": [:]
+        ], type: .events))
+        return persistence.loadEntitiesInBatch(type: .events)
+            .first?[OursPrivacyPersistence.localRowIDKey] as? String ?? ""
+    }
+
+    func testPersistedRejectionWaitsForInitializeCallbackAndServerURL() async {
+        let token = "startup-rejection-\(UUID().uuidString)"
+        let persistedRowID = seedPersistedRejection(token: token)
+        defer { OursPrivacyPersistence.deleteUserDefaultsData(instanceName: token) }
+        XCTAssertFalse(persistedRowID.isEmpty)
+        let op = OursPrivacy(token: token, trackAutomaticEvents: false)
+        let capture = RejectionCapture()
+        let response = ingestResult("""
+            {"success":true,"visitor_id":"visitor","accepted":0,
+             "rejected":[{"index":0,"code":"mobile_occurred_at_future"}]}
+            """)
+        let request = ScriptedIngestRequest(responses: [response])
+        op.flushInstance.flushRequest = request
+
+        op.flushInterval = 10
+        op.trackingQueue.sync {}
+        op.networkQueue.sync {}
+        XCTAssertTrue(request.sentServerURLs.isEmpty)
+        XCTAssertEqual(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+            .first?[OursPrivacyPersistence.localRowIDKey] as? String, persistedRowID)
+
+        await op.initialize(options: OursPrivacyInitOptions(
+            serverURL: "http://127.0.0.1:8765",
+            onIngestRejected: { capture.append($0, $1) }))
+        op.trackingQueue.sync {}
+        op.trackingQueue.sync {}
+        op.networkQueue.sync {}
+
+        XCTAssertEqual(op.flushInterval, 10)
+        XCTAssertEqual(request.sentServerURLs, ["http://127.0.0.1:8765"])
+        XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+        XCTAssertEqual(capture.captured.count, 1)
+        XCTAssertEqual(capture.captured.first?.0, "persisted-event-id")
+        XCTAssertEqual(capture.captured.first?.1, "mobile_occurred_at_future")
+    }
+
+    func testPersistedRejectionIsNotSentBeforeStartupOptOut() async {
+        let token = "startup-optout-\(UUID().uuidString)"
+        let persistedRowID = seedPersistedRejection(token: token)
+        defer { OursPrivacyPersistence.deleteUserDefaultsData(instanceName: token) }
+        XCTAssertFalse(persistedRowID.isEmpty)
+        let op = OursPrivacy(token: token, trackAutomaticEvents: false)
+        let capture = RejectionCapture()
+        let response = ingestResult("""
+            {"success":true,"visitor_id":"visitor","accepted":0,
+             "rejected":[{"index":0,"code":"mobile_occurred_at_future"}]}
+            """)
+        let request = ScriptedIngestRequest(responses: [response])
+        op.flushInstance.flushRequest = request
+
+        op.flushInterval = 10
+        op.trackingQueue.sync {}
+        op.networkQueue.sync {}
+        XCTAssertTrue(request.sentServerURLs.isEmpty)
+
+        await op.initialize(options: OursPrivacyInitOptions(
+            optedOutByDefault: true,
+            onIngestRejected: { capture.append($0, $1) }))
+        op.trackingQueue.sync {}
+        op.networkQueue.sync {}
+
+        XCTAssertTrue(op.hasOptedOutTracking())
+        XCTAssertTrue(request.sentServerURLs.isEmpty)
+        XCTAssertTrue(capture.captured.isEmpty)
+        XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
     }
 
     func testIndexedMixedBatchRemovesSentRowsAndReportsOnlyRejectedDistinctId() {

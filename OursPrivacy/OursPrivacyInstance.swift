@@ -430,7 +430,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
         flushInstance.applicationWillResignActive()
 #if os(OSX)
         if flushOnBackground {
-            flush()
+            flushAutomatically()
         }
 #endif
     }
@@ -454,7 +454,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
         }
         taskId = sharedApplication.beginBackgroundTask(expirationHandler: completionHandler)
         if flushOnBackground {
-            flush(performFullFlush: true, completion: completionHandler)
+            flushAutomatically(performFullFlush: true, completion: completionHandler)
         }
     }
 
@@ -802,7 +802,7 @@ extension OursPrivacy {
         }
 
         if OursPrivacy.isiOSAppExtension() {
-            flush()
+            flushAutomatically()
         }
     }
 
@@ -923,6 +923,18 @@ extension OursPrivacy {
 
 extension OursPrivacy {
     // MARK: - Flush
+
+    func flushAutomatically(performFullFlush: Bool = false, completion: (@Sendable () -> Void)? = nil) {
+        trackingQueue.async { [weak self, completion] in
+            guard let self, self.mobileLifecycleReady else {
+                if let completion {
+                    DispatchQueue.main.async(execute: completion)
+                }
+                return
+            }
+            self.flush(performFullFlush: performFullFlush, completion: completion)
+        }
+    }
 
     /// Drains the local event queue to `/ingest`. The flush timer and the
     /// background hook also call this; the host rarely needs to.
@@ -1077,7 +1089,7 @@ extension OursPrivacy {
         }
 
         if OursPrivacy.isiOSAppExtension() {
-            flush()
+            flushAutomatically()
         }
     }
 }

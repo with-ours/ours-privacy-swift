@@ -8,7 +8,7 @@
 import Foundation
 
 protocol FlushDelegate: AnyObject {
-    func flush(performFullFlush: Bool, completion: (@Sendable () -> Void)?)
+    func flushAutomatically(performFullFlush: Bool, completion: (@Sendable () -> Void)?)
     func canFlushBatch(type: FlushType, rows: Queue) -> Bool
     func acknowledgeFlush(type: FlushType, rowIDs: [String]) -> Bool
     func hasIndexedIngestMode() -> Bool
@@ -48,7 +48,7 @@ class Flush: AppLifecycle, @unchecked Sendable {
             flushRequestReadWriteLock.sync(flags: .barrier) {
                 _flushInterval = newValue
             }
-            delegate?.flush(performFullFlush: false, completion: nil)
+            delegate?.flushAutomatically(performFullFlush: false, completion: nil)
             startFlushTimer()
         }
     }
@@ -90,7 +90,7 @@ class Flush: AppLifecycle, @unchecked Sendable {
     }
 
     @objc func flushSelector() {
-        delegate?.flush(performFullFlush: false, completion: nil)
+        delegate?.flushAutomatically(performFullFlush: false, completion: nil)
     }
 
     func stopFlushTimer() {
