@@ -75,13 +75,36 @@ class FlushRequest: Network, @unchecked Sendable {
 
     var networkRequestsAllowedAfterTime = 0.0
     var networkConsecutiveFailures = 0
+    private let activeRequestLock = NSLock()
+    private var activeTask: URLSessionDataTask?
+    private var privacyGeneration: UInt64 = 0
+
+    var requestGeneration: UInt64 {
+        activeRequestLock.lock()
+        defer { activeRequestLock.unlock() }
+        return privacyGeneration
+    }
+
+    func cancelActiveRequest() {
+        activeRequestLock.lock()
+        privacyGeneration &+= 1
+        let task = activeTask
+        activeTask = nil
+        activeRequestLock.unlock()
+        task?.cancel()
+    }
+
+    private func isCurrentRequest(_ generation: UInt64) -> Bool {
+        activeRequestLock.lock()
+        defer { activeRequestLock.unlock() }
+        return generation == privacyGeneration
+    }
 
     func sendRequest(_ requestData: String,
                      type: FlushType,
                      headers: [String: String],
-                     queryItems: [URLQueryItem] = []) -> IngestBatchResult? {
-
-        OursPrivacyLogger.debug(message: "sendRequest: type \(type), data: \(requestData)")
+                     queryItems: [URLQueryItem] = [],
+                     generation: UInt64) -> IngestBatchResult? {
 
         let resourceHeaders: [String: String] = ["Content-Type": "application/json"].merging(headers) {(_, new) in new }
 
@@ -94,29 +117,46 @@ class FlushRequest: Network, @unchecked Sendable {
                                              headers: resourceHeaders,
                                              parse: { data in IngestBatchResult.parse(data) })
         let completion = RequestCompletion()
-        flushRequestHandler(serverURL,
-                            resource: resource,
-                            completion: { result in
-                                completion.finish(result)
-        })
-        return completion.wait()
+        let task = flushRequestHandler(serverURL, resource: resource, generation: generation) {
+            completion.finish($0)
+        }
+        activeRequestLock.lock()
+        guard generation == privacyGeneration else {
+            activeRequestLock.unlock()
+            task?.cancel()
+            return nil
+        }
+        activeTask = task
+        activeRequestLock.unlock()
+        OursPrivacyLogger.debug(message: "sendRequest: type \(type), data: \(requestData)")
+        task?.resume()
+        let result = completion.wait()
+        activeRequestLock.lock()
+        if activeTask === task { activeTask = nil }
+        let isCurrent = generation == privacyGeneration
+        activeRequestLock.unlock()
+        return isCurrent ? result : nil
     }
 
     private func flushRequestHandler(_ base: String,
                                      resource: Resource<IngestBatchResult>,
-                                     completion: @escaping @Sendable (IngestBatchResult?) -> Void) {
-
-        Network.apiRequest(base: base, resource: resource,
+                                     generation: UInt64,
+                                     completion: @escaping @Sendable (IngestBatchResult?) -> Void) -> URLSessionDataTask? {
+        let task = Network.makeRequestTask(base: base, resource: resource,
             failure: { (reason, _, response) in
+                guard self.isCurrentRequest(generation) else { completion(nil); return }
                 self.networkConsecutiveFailures += 1
                 self.updateRetryDelay(response)
                 OursPrivacyLogger.warn(message: "API request to \(resource.path) has failed with reason \(reason)")
                 completion(nil)
             }, success: { (result, response) in
+                guard self.isCurrentRequest(generation) else { completion(nil); return }
                 self.networkConsecutiveFailures = 0
                 self.updateRetryDelay(response)
                 completion(result)
             })
+        if task == nil { completion(nil) }
+        return task
     }
 
     private func updateRetryDelay(_ response: URLResponse?) {

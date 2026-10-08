@@ -106,6 +106,7 @@ class Flush: AppLifecycle, @unchecked Sendable {
     /// we stop so a retry can pick up where this attempt left off.
     func flushQueueInBatches(_ queue: Queue, type: FlushType, headers: [String: String], queryItems: [URLQueryItem]) {
         guard let context = delegate?.flushEnvelopeContext() else { return }
+        let generation = flushRequest.requestGeneration
 
         var mutableQueue = queue
         while !mutableQueue.isEmpty {
@@ -138,7 +139,8 @@ class Flush: AppLifecycle, @unchecked Sendable {
             guard let result = flushRequest.sendRequest(requestData,
                                                         type: type,
                                                         headers: headers,
-                                                        queryItems: queryItems),
+                                                        queryItems: queryItems,
+                                                        generation: generation),
                   result.success else { break }
             if result.isIndexed {
                 guard let accepted = result.accepted, let rejected = result.rejected,

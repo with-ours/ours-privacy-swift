@@ -251,6 +251,48 @@ final class MobileSessionTests: XCTestCase {
         XCTAssertFalse(unchanged.contains { $0.name == "$mobile_app_update" })
     }
 
+    func testUnavailableMetadataDoesNotEmitUpdateOrClearKnownBaseline() {
+        let sessionName = "missing-build-\(UUID().uuidString)"
+        let session = makeSession(sessionName)
+        _ = session.foreground(automaticEnabled: true, visitorId: "visitor-a",
+                               appVersion: "2.3", appBuild: "45", at: point(0))
+        _ = session.background(at: point(10_000))
+
+        let missingBuild = session.foreground(automaticEnabled: true, visitorId: "visitor-a",
+                                              appVersion: "2.3", appBuild: nil, at: point(20_000))
+        XCTAssertFalse(missingBuild.contains { $0.name == "$mobile_app_update" })
+        _ = session.background(at: point(30_000))
+
+        let restored = makeSession(sessionName)
+        let missingVersion = restored.foreground(automaticEnabled: true, visitorId: "visitor-a",
+                                                appVersion: nil, appBuild: "45", at: point(40_000))
+        XCTAssertFalse(missingVersion.contains { $0.name == "$mobile_app_update" })
+        _ = restored.background(at: point(50_000))
+
+        let recovered = restored.foreground(automaticEnabled: true, visitorId: "visitor-a",
+                                            appVersion: "2.3", appBuild: "45", at: point(60_000))
+        XCTAssertFalse(recovered.contains { $0.name == "$mobile_app_update" })
+    }
+
+    func testVersionChangeWithUnavailableBuildPreservesBuildBaseline() {
+        let session = makeSession()
+        _ = session.foreground(automaticEnabled: true, visitorId: "visitor-a",
+                               appVersion: "2.3", appBuild: "45", at: point(0))
+        _ = session.background(at: point(10_000))
+
+        let changed = session.foreground(automaticEnabled: true, visitorId: "visitor-a",
+                                         appVersion: "2.4", appBuild: nil, at: point(20_000))
+        let updates = changed.filter { $0.name == "$mobile_app_update" }
+        XCTAssertEqual(updates.count, 1)
+        XCTAssertEqual(updates.first?.properties["previous_app_version"] as? String, "2.3")
+        XCTAssertEqual(updates.first?.properties["previous_app_build"] as? String, "45")
+        _ = session.background(at: point(30_000))
+
+        let recovered = session.foreground(automaticEnabled: true, visitorId: "visitor-a",
+                                           appVersion: "2.4", appBuild: "45", at: point(40_000))
+        XCTAssertFalse(recovered.contains { $0.name == "$mobile_app_update" })
+    }
+
     func testManualSnapshotWithoutAutomaticTrackingCreatesSessionWithoutFacts() {
         let session = makeSession()
         let snapshot = session.snapshot(visitorId: "visitor-a", at: point(0))

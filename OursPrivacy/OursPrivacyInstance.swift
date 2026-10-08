@@ -1225,6 +1225,7 @@ extension OursPrivacy {
             self.readWriteLock.write {
                 self.optOutStatus = true
             }
+            self.flushInstance.flushRequest.cancelActiveRequest()
             OursPrivacyPersistence.saveOptOutStatusFlag(value: true, instanceName: self.name)
             self.mobileSession?.disable()
             self.readWriteLock.write {

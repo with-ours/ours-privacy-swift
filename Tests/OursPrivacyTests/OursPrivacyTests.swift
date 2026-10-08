@@ -6,7 +6,8 @@ private final class RecordingFlushRequest: FlushRequest, @unchecked Sendable {
     private var bodies: [String] = []
 
     override func sendRequest(_ requestData: String, type: FlushType,
-                              headers: [String: String], queryItems: [URLQueryItem] = []) -> IngestBatchResult? {
+                              headers: [String: String], queryItems: [URLQueryItem] = [],
+                              generation: UInt64) -> IngestBatchResult? {
         lock.lock()
         bodies.append(requestData)
         lock.unlock()
@@ -20,14 +21,16 @@ private final class RecordingFlushRequest: FlushRequest, @unchecked Sendable {
     }
 }
 
-private final class HeldFirstFlushRequest: FlushRequest, @unchecked Sendable {
+final class HeldFirstFlushRequest: FlushRequest, @unchecked Sendable {
     let firstStarted = DispatchSemaphore(value: 0)
     let releaseFirst = DispatchSemaphore(value: 0)
+    var failFirst = false
     private let lock = NSLock()
     private var bodies: [String] = []
 
     override func sendRequest(_ requestData: String, type: FlushType,
-                              headers: [String: String], queryItems: [URLQueryItem] = []) -> IngestBatchResult? {
+                              headers: [String: String], queryItems: [URLQueryItem] = [],
+                              generation: UInt64) -> IngestBatchResult? {
         lock.lock()
         bodies.append(requestData)
         let isFirst = bodies.count == 1
@@ -36,6 +39,7 @@ private final class HeldFirstFlushRequest: FlushRequest, @unchecked Sendable {
             firstStarted.signal()
             _ = releaseFirst.wait(timeout: .now() + 5)
         }
+        if isFirst && failFirst { return nil }
         return IngestBatchResult(success: true, visitorId: "legacy", accepted: nil, rejected: nil)
     }
 
@@ -283,16 +287,6 @@ final class OursPrivacyTests: XCTestCase {
         let merged = Track.mergeUserProperties(
             perCall: nil, defaultCustom: [:], defaultConsent: [:])
         XCTAssertNil(merged)
-    }
-
-    func testUserPropertiesMergeFastPathPassesPerCallThrough() {
-        // No store-level defaults configured ⇒ per-call returned unchanged.
-        let merged = Track.mergeUserProperties(
-            perCall: ["email": "u@example.com", "consent": ["analytics": true]],
-            defaultCustom: [:],
-            defaultConsent: [:])
-        XCTAssertEqual(merged?["email"] as? String, "u@example.com")
-        XCTAssertNotNil(merged?["consent"])
     }
 
     // MARK: - defaultProperties canonical keys

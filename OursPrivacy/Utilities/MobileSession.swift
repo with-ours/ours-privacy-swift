@@ -202,15 +202,18 @@ final class MobileSession {
                 state.automaticStartSid = snapshot.sid
             }
             if appVersion != nil || appBuild != nil {
-                if (state.observedAppVersion != nil || state.observedAppBuild != nil) &&
-                    (state.observedAppVersion != appVersion || state.observedAppBuild != appBuild) {
+                let versionChanged = appVersion != nil && state.observedAppVersion != nil &&
+                    state.observedAppVersion != appVersion
+                let buildChanged = appBuild != nil && state.observedAppBuild != nil &&
+                    state.observedAppBuild != appBuild
+                if versionChanged || buildChanged {
                     var values: [String: MobileValue] = [:]
                     if let previous = state.observedAppVersion { values["previous_app_version"] = .text(previous) }
                     if let previous = state.observedAppBuild { values["previous_app_build"] = .text(previous) }
                     facts.append(record("$mobile_app_update", snapshot: snapshot, values: values))
                 }
-                state.observedAppVersion = appVersion
-                state.observedAppBuild = appBuild
+                if let appVersion { state.observedAppVersion = appVersion }
+                if let appBuild { state.observedAppBuild = appBuild }
             }
             handledAutomaticForeground = true
             persist()

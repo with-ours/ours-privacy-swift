@@ -158,12 +158,13 @@ class Track {
         let havePerCallConsent = !perCallConsent.isEmpty
 
         if !haveDefaultCustom && !haveDefaultConsent {
-            // Fast path — no store-level defaults configured. Pass per-call
-            // through unchanged (still null if caller passed nothing).
+            // Fast path — no store-level defaults configured. Keep per-call
+            // properties except empty consent (still null if nothing remains).
             guard let perCall = perCall, !perCall.isEmpty else { return nil }
             var out: InternalProperties = [:]
             for (k, v) in perCall { out[k] = v }
-            return out
+            if !havePerCallConsent { out.removeValue(forKey: "consent") }
+            return out.isEmpty ? nil : out
         }
 
         if !havePerCall && !haveDefaultCustom && !haveDefaultConsent {

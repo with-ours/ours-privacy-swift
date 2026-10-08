@@ -20,7 +20,8 @@ private final class ScriptedIngestRequest: FlushRequest, @unchecked Sendable {
     }
 
     override func sendRequest(_ requestData: String, type: FlushType,
-                              headers: [String: String], queryItems: [URLQueryItem] = []) -> IngestBatchResult? {
+                              headers: [String: String], queryItems: [URLQueryItem] = [],
+                              generation: UInt64) -> IngestBatchResult? {
         calls += 1
         sentServerURLs.append(serverURL)
         if holdFirst && calls == 1 {
