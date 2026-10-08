@@ -124,13 +124,23 @@ public struct OursPrivacyInitOptions {
     /// prior opt-in / opt-out decision is already persisted.
     public var optedOutByDefault: Bool?
 
+    /// Overrides purchase tracking at boot. Omit to retain the constructor value.
+    /// StoreKit collection is disabled by default and independent of lifecycle events.
+    public var trackAutomaticPurchases: Bool?
+
+    /// Called after a rejected ingest item is durably removed from the queue.
+    /// Arguments are the event's `distinct_id` and rejection code.
+    public var onIngestRejected: (@Sendable (String, String) -> Void)?
+
     public init(serverURL: String? = nil,
                 visitorId: String? = nil,
                 initialURL: String? = nil,
                 defaultEventProperties: [String: OursPrivacyType]? = nil,
                 defaultUserCustomProperties: [String: OursPrivacyType]? = nil,
                 defaultUserConsentProperties: [String: OursPrivacyType]? = nil,
-                optedOutByDefault: Bool? = nil) {
+                optedOutByDefault: Bool? = nil,
+                trackAutomaticPurchases: Bool? = nil,
+                onIngestRejected: (@Sendable (String, String) -> Void)? = nil) {
         self.serverURL = serverURL
         self.visitorId = visitorId
         self.initialURL = initialURL
@@ -138,6 +148,8 @@ public struct OursPrivacyInitOptions {
         self.defaultUserCustomProperties = defaultUserCustomProperties
         self.defaultUserConsentProperties = defaultUserConsentProperties
         self.optedOutByDefault = optedOutByDefault
+        self.trackAutomaticPurchases = trackAutomaticPurchases
+        self.onIngestRejected = onIngestRejected
     }
 }
 

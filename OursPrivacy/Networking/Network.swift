@@ -71,15 +71,15 @@ class Network {
         self.serverURL = serverURL
     }
 
-    class func apiRequest<A: Sendable>(base: String,
-                                       resource: Resource<A>,
-                                       failure: @escaping @Sendable (Reason, Data?, URLResponse?) -> Void,
-                                       success: @escaping @Sendable (A, URLResponse?) -> Void) {
+    class func makeRequestTask<A: Sendable>(base: String,
+                                            resource: Resource<A>,
+                                            failure: @escaping @Sendable (Reason, Data?, URLResponse?) -> Void,
+                                            success: @escaping @Sendable (A, URLResponse?) -> Void) -> URLSessionDataTask? {
         guard let request = buildURLRequest(base, resource: resource) else {
-            return
+            return nil
         }
 
-        URLSession.shared.dataTask(with: request) { (data, response, error) in
+        let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
             guard let httpResponse = response as? HTTPURLResponse else {
 
                 if let hasError = error {
@@ -104,7 +104,8 @@ class Network {
             }
             OursPrivacyLogger.debug(message: "Network result is \(result)")
             success(result, response)
-        }.resume()
+        }
+        return task
     }
 
     private class func buildURLRequest<A: Sendable>(_ base: String, resource: Resource<A>) -> URLRequest? {

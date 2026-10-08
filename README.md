@@ -19,6 +19,7 @@ Privacy-first analytics for iOS, tvOS, macOS, and watchOS, written in Swift.
 - [API Reference](#api-reference)
   - [Initialization](#initialization)
   - [Core Tracking](#core-tracking)
+  - [Mobile Screens and Purchases](#mobile-screens-and-purchases)
   - [Default Properties](#default-properties)
   - [Configuration](#configuration)
   - [Identity](#identity)
@@ -38,7 +39,7 @@ Privacy-first analytics for iOS, tvOS, macOS, and watchOS, written in Swift.
 In Xcode: **File → Add Package Dependencies…** and enter `https://github.com/with-ours/ours-privacy-swift`. Or add to `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/with-ours/ours-privacy-swift", from: "3.0.0"),
+.package(url: "https://github.com/with-ours/ours-privacy-swift", from: "3.1.0"),
 ```
 
 Then add `"OursPrivacyKit"` to your target's dependencies.
@@ -52,6 +53,10 @@ Then add `"OursPrivacyKit"` to your target's dependencies.
 Version 3.0 requires Xcode with Swift 6 support and raises the deployment targets to iOS 15, tvOS 15, macOS 12, and watchOS 8. Apps with lower deployment targets should remain on 2.x. The package uses Swift 5 language mode with complete concurrency checking.
 
 The `identify`, `reset`, and `flush` completion closures are now `@Sendable`. If a completion captures mutable or main-actor state, move that work onto the appropriate actor or capture a thread-safe value. Event payloads now report `defaultProperties.version` as `swift@3.0.0`; update any code that compares the old value. CocoaPods consumers must move to Swift Package Manager for 3.0.
+
+**Mobile instrumentation migration:** `trackAutomaticEvents: true` continues to enable lifecycle events, but no longer observes StoreKit or emits `$ae_iap` by itself. Apps that intentionally use the legacy purchase event must set `trackAutomaticPurchases: true` at construction or boot. Review product identifiers and prices before enabling collection. Add explicit `trackScreen` calls for app screens; the SDK does not infer every UIKit or SwiftUI navigation transition.
+
+**Deep-link migration:** `$deep_link_opened` keeps its event name but the SDK no longer adds `eventProperties.url`. Replace reports or integrations that read the full URL with the supported UTM and click-ID fields in `defaultProperties`. Do not copy the URL into custom properties. Use PHI-free event and screen names, attribution values, and visitor IDs; screen names should be fixed labels without route parameters or patient details.
 
 ### 2. Initialize
 
@@ -130,20 +135,22 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 ### Initialization
 
-#### `OursPrivacy(token:trackAutomaticEvents:)`
+#### `OursPrivacy(token:trackAutomaticEvents:trackAutomaticPurchases:)`
 
 Construct an instance. Hold a single `OursPrivacy` for the lifetime of your app.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `token` | `String` | Yes | Your project token |
-| `trackAutomaticEvents` | `Bool` | Yes | Record session and first-launch events automatically (ignored on watchOS / macOS) |
+| `trackAutomaticEvents` | `Bool` | No | Record iOS lifecycle, engagement, and update events automatically; defaults to `false` (ignored on watchOS / macOS) |
+| `trackAutomaticPurchases` | `Bool` | No | Observe StoreKit purchases and emit legacy `$ae_iap`; defaults to `false`, independent of lifecycle tracking |
 
 ```swift
 let op = OursPrivacy(token: "YOUR_API_TOKEN", trackAutomaticEvents: true)
 ```
 
 There is also an overload that accepts a `ProxyServerConfig` if you route ingest through a proxy.
+Both overloads leave automatic lifecycle tracking off when `trackAutomaticEvents` is omitted.
 
 ---
 
@@ -160,6 +167,8 @@ Apply boot-time options and start the flush timer. Call once, immediately after 
 | Field | Type | Description |
 |-------|------|-------------|
 | `optedOutByDefault` | `Bool` | If `true`, tracking starts opted out (default: `false`) |
+| `trackAutomaticPurchases` | `Bool?` | Override the constructor's purchase choice at boot; omitted keeps it unchanged (default: `false`) |
+| `onIngestRejected` | `(@Sendable (String, String) -> Void)?` | Called with an event's `distinct_id` and rejection code after the rejected batch leaves the durable queue |
 | `visitorId` | `String` | Pre-set the visitor ID; sets `is_manually_set_id: true` on all events |
 | `defaultEventProperties` | `[String: OursPrivacyType]` | Properties merged into `eventProperties` on every `track()` call |
 | `defaultUserCustomProperties` | `[String: OursPrivacyType]` | Properties merged into `userProperties.custom_properties` on every event |
@@ -202,6 +211,56 @@ Track an event with optional properties.
 ```swift
 op.track(event: "Page View", properties: ["page": "/home", "referrer": "google"])
 ```
+
+---
+
+### Mobile Screens and Purchases
+
+#### `op.trackScreen(_:)`
+
+Call on each actual iOS app screen transition, including custom UIKit navigation and SwiftUI routes. The API emits one `$mobile_screen_view` with `eventProperties.screen_name` for a new label; repeated calls with the active label are suppressed. A screen switch first emits any measured `$mobile_session_engagement` for the previous screen, with `engagement_duration_ms` and that previous `screen_name` (when automatic lifecycle tracking is on). Automatic screen discovery is not complete for custom navigation, so connect your own navigation callback. On macOS, tvOS, visionOS, watchOS, and iOS apps running on Mac, `trackScreen` emits no canonical screen event; use ordinary `track(event:)` for supported manual events.
+
+```swift
+func didShowRoute(_ route: AppRoute) {
+    switch route {
+    case .schedule:
+        op.trackScreen("Schedule")
+    case .booking:
+        op.trackScreen("Booking")
+    }
+}
+```
+
+Use fixed developer-chosen labels of 1–80 ASCII characters matching `^[A-Za-z][A-Za-z0-9 _-]{0,79}$`, without leading or trailing whitespace. Empty, URL-like, and non-ASCII strings are ignored. Validation cannot tell a patient name such as `Jane Smith` from a fixed label, so **never** pass patient data, visible titles, route parameters, or raw URLs. Map each route to a fixed label as above. The SDK does not inspect screen content.
+
+`trackScreen` and manual `track()` work with `trackAutomaticEvents: false`. On iOS, each carries the mobile session metadata below. `trackAutomaticEvents` defaults to `false` and enables automatic lifecycle, engagement, and update facts when set to `true`. `$mobile_*` names are reserved for SDK facts: manual `track(event:)` calls with that prefix are ignored, including unknown names. Legacy `$ae_*` handling is unchanged.
+
+| Canonical event | When emitted on iOS | `eventProperties` |
+| --- | --- | --- |
+| `$mobile_first_open` | First eligible tracked foreground open for this installation and token, once | `null` |
+| `$mobile_app_open` | Each foreground entry, including cold and warm opens | `null` |
+| `$mobile_session_start` | First tracked foreground entry in a new session, once per `sid` | `null` |
+| `$mobile_session_engagement` | A positive measured foreground-time delta at a checkpoint, screen change, or pause/background | Required positive integer `engagement_duration_ms` in milliseconds; `screen_name` when a tracked screen is active |
+| `$mobile_session_end` | Best effort when an expired session is observed on a later foreground entry; it can be absent | `null` |
+| `$mobile_app_update` | A later tracked open after the observed app version or build changes, never the first observed open | `previous_app_version` and `previous_app_build` when previously known |
+| `$mobile_screen_view` | A valid explicit `trackScreen` transition; repeated active labels are suppressed | Required `screen_name`; no `screen_class` is collected by the explicit Swift API |
+
+Every iOS mobile event, including manual `track()` and `trackScreen()`, has SDK-owned `defaultProperties.sid` (a session ID), `mobile_session_started_at`, `mobile_occurred_at`, `mobile_platform: "ios"`, and `mobile_contract_version: 1`, plus `app_version` and `app_build` when the host bundle supplies them. Canonical facts also have `device_vendor` and `version`, plus `device_model`, `device_type`, `os_name`, `os_version`, `screen_width`, and `screen_height` when available. `version` is the SDK version, not the app version. Timestamps are ISO-8601 UTC with exactly three fractional digits and `Z`; `mobile_occurred_at` is captured when the event is queued and is no earlier than its session start. The SDK does not set top-level `time`. Foregrounding at or after 30 minutes of inactivity starts a new `sid`; a warm open under 30 minutes keeps it. Engagement uses nonoverlapping, positive integer millisecond deltas from a monotonic clock; 10 seconds accumulated within a session meets the engaged threshold. Reset, visitor-ID change, and opt-out discard the session; opt-out clears queued events and suppresses manual screens, lifecycle facts, and purchases.
+
+Canonical facts carry only SDK lifecycle metadata and stable screen labels. They have `userProperties: null`, never merge caller default or per-call event/user properties, and collect no patient fields, advertising IDs, or raw URL. Screen labels and manual event properties are developer-controlled, so keep them free of patient data and route parameters. The mobile contract applies to iOS app runtime; on macOS, tvOS, visionOS, watchOS, and iOS apps running on Mac, `trackScreen` emits no canonical fact and ordinary manual events continue without mobile session metadata.
+
+#### StoreKit purchase collection
+
+StoreKit observation is separately disabled by default, even if `trackAutomaticEvents` is `true`. Set `trackAutomaticPurchases: true` at construction or use `OursPrivacyInitOptions(trackAutomaticPurchases: true)` during `initialize()` to keep legacy `$ae_iap` telemetry. You may enable purchases while automatic lifecycle tracking is off.
+
+```swift
+let op = OursPrivacy(token: "YOUR_API_TOKEN",
+                     trackAutomaticEvents: true,
+                     trackAutomaticPurchases: true)
+await op.initialize()
+```
+
+When enabled, a purchased StoreKit transaction emits `$ae_iap` with `eventProperties.$ae_iap_price` (string), `$ae_iap_quantity` (integer), and `$ae_iap_name` (product identifier). The purchase option controls both observation and queued `$ae_iap` delivery. Full opt-out suppresses it.
 
 ---
 
@@ -269,6 +328,25 @@ Push all queued events to the server immediately. Useful before app close or log
 ```swift
 op.flush()
 ```
+
+An indexed `/ingest` response acknowledges accepted and rejected items together. Set
+`onIngestRejected` in `OursPrivacyInitOptions` or on the instance to handle rejected events:
+
+```swift
+await op.initialize(options: OursPrivacyInitOptions(
+    onIngestRejected: { _, code in
+        print("Ingest rejected: \(code)")
+    }
+))
+```
+
+The callback runs on the SDK network queue after queue removal succeeds. It receives
+`distinct_id` and the rejection code, without event properties. A caller can supply
+`$distinct_id`, so the ID may contain patient data; log only the code. Keep callback
+work brief or dispatch it to your app's queue. Transport
+failures and malformed or stale responses retain queued events without invoking it.
+Legacy no-index responses can acknowledge batches until this source token has received
+an indexed response; indexed mode persists across app restarts.
 
 ---
 
@@ -427,9 +505,11 @@ op.setVisitorId("550e8400-e29b-41d4-a716-446655440000")
 
 #### `op.trackDeepLink(_:)`
 
-Parse a deep link URL for marketing attribution data and fire a `$deep_link_opened` event. Extracts UTM parameters, ad network click IDs, and `ours_visitor_id` for cross-platform identity stitching.
+Parse a deep link URL for marketing attribution data and fire a `$deep_link_opened` event. The SDK does not add the raw URL to event properties or its own diagnostics. It extracts only supported UTM parameters, ad network click IDs, and `ours_visitor_id` for cross-platform identity stitching; other query parameters are ignored.
 
 Parsed attribution params are merged into `defaultProperties`, so they appear on all subsequent `track()` calls. Calling `trackDeepLink` again **replaces** the prior attribution rather than merging, so stale UTM keys don't leak into events triggered by a later link.
+
+Keep attribution values and `ours_visitor_id` free of PHI. The SDK forwards supported values as supplied by the app, so avoid patient details in campaign names, click IDs, and other attribution values.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -492,7 +572,7 @@ op.trackDeepLink("myapp://open?aleid=click_abc&alart=user_xyz&utm_source=applovi
 
 #### `op.optOutTracking()`
 
-Stop all tracking immediately. Any queued events that have not been flushed will be discarded. Call `flush()` first if you want to preserve queued events.
+Stop all tracking immediately. Any queued events that have not been flushed will be discarded. Call `flush()` first if you want to preserve queued events. Opt-out rotates `visitor_id` and clears the current mobile session. A later opt-in starts a new session under the new visitor ID, so reports do not automatically link activity before and after opt-out.
 
 **Returns:** `Void`
 
@@ -564,7 +644,7 @@ The SDK sends a JSON body to `POST /ingest` on the configured `serverURL`. Under
         "os_version": "18.0",
         "device_vendor": "Apple",
         "device_model": "iPhone17,1",
-        "version": "swift@3.0.0"
+        "version": "swift@3.1.0"
       }
     }
   ]

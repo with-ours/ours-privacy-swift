@@ -16,19 +16,53 @@ enum FlushType: String {
     case events = "/ingest"
 }
 
+struct IngestRejection: Decodable, Sendable {
+    let index: Int
+    let code: String
+}
+
+struct IngestBatchResult: Decodable, Sendable {
+    let success: Bool
+    let visitorId: String
+    let accepted: Int?
+    let rejected: [IngestRejection]?
+
+    enum CodingKeys: String, CodingKey {
+        case success
+        case visitorId = "visitor_id"
+        case accepted
+        case rejected
+    }
+
+    var isIndexed: Bool { accepted != nil && rejected != nil }
+
+    static func parse(_ data: Data) -> IngestBatchResult? {
+        guard let result = try? JSONDecoder().decode(Self.self, from: data),
+              result.success, !result.visitorId.isEmpty,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        let hasAccepted = object.keys.contains("accepted")
+        let hasRejected = object.keys.contains("rejected")
+        guard hasAccepted == hasRejected else { return nil }
+        if hasAccepted && !result.isIndexed { return nil }
+        return result
+    }
+}
+
 private final class RequestCompletion: @unchecked Sendable {
     private let lock = NSLock()
     private let semaphore = DispatchSemaphore(value: 0)
-    private var result = false
+    private var result: IngestBatchResult?
 
-    func finish(_ success: Bool) {
+    func finish(_ result: IngestBatchResult?) {
         lock.lock()
-        result = success
+        self.result = result
         lock.unlock()
         semaphore.signal()
     }
 
-    func wait() -> Bool {
+    func wait() -> IngestBatchResult? {
         _ = semaphore.wait(timeout: .now() + 120)
         lock.lock()
         defer { lock.unlock() }
@@ -41,35 +75,36 @@ class FlushRequest: Network, @unchecked Sendable {
 
     var networkRequestsAllowedAfterTime = 0.0
     var networkConsecutiveFailures = 0
+    private let activeRequestLock = NSLock()
+    private var activeTask: URLSessionDataTask?
+    private var privacyGeneration: UInt64 = 0
+
+    var requestGeneration: UInt64 {
+        activeRequestLock.lock()
+        defer { activeRequestLock.unlock() }
+        return privacyGeneration
+    }
+
+    func cancelActiveRequest() {
+        activeRequestLock.lock()
+        privacyGeneration &+= 1
+        let task = activeTask
+        activeTask = nil
+        activeRequestLock.unlock()
+        task?.cancel()
+    }
+
+    private func isCurrentRequest(_ generation: UInt64) -> Bool {
+        activeRequestLock.lock()
+        defer { activeRequestLock.unlock() }
+        return generation == privacyGeneration
+    }
 
     func sendRequest(_ requestData: String,
                      type: FlushType,
                      headers: [String: String],
-                     queryItems: [URLQueryItem] = []) -> Bool {
-
-        OursPrivacyLogger.debug(message: "sendRequest: type \(type), data: \(requestData)")
-
-//        let responseParser: (Data) -> Int? = { data in
-//            let response = String(data: data, encoding: String.Encoding.utf8)
-//            if let response = response {
-//                return Int(response) ?? 0
-//            }
-//            return nil
-//        }
-
-        let responseParser: @Sendable (Data) -> OursResponse = { data in
-            var finalResponse = OursResponse(success: false)
-            do {
-                let responseJson = try JSONSerialization.jsonObject(with: data, options: [])
-                if let dictionary = responseJson as? [String: Any] {
-                    finalResponse = OursResponse(success: dictionary["success"] as? Bool ?? false)
-                }
-            } catch {
-                // return default
-            }
-            return finalResponse
-
-        }
+                     queryItems: [URLQueryItem] = [],
+                     generation: UInt64) -> IngestBatchResult? {
 
         let resourceHeaders: [String: String] = ["Content-Type": "application/json"].merging(headers) {(_, new) in new }
 
@@ -80,34 +115,48 @@ class FlushRequest: Network, @unchecked Sendable {
                                              requestBody: requestData.data(using: .utf8),
                                              queryItems: resourceQueryItems,
                                              headers: resourceHeaders,
-                                             parse: responseParser)
+                                             parse: { data in IngestBatchResult.parse(data) })
         let completion = RequestCompletion()
-        flushRequestHandler(serverURL,
-                            resource: resource,
-                            completion: { success in
-                                completion.finish(success)
-        })
-        return completion.wait()
+        let task = flushRequestHandler(serverURL, resource: resource, generation: generation) {
+            completion.finish($0)
+        }
+        activeRequestLock.lock()
+        guard generation == privacyGeneration else {
+            activeRequestLock.unlock()
+            task?.cancel()
+            return nil
+        }
+        activeTask = task
+        activeRequestLock.unlock()
+        OursPrivacyLogger.debug(message: "sendRequest: type \(type), data: \(requestData)")
+        task?.resume()
+        let result = completion.wait()
+        activeRequestLock.lock()
+        if activeTask === task { activeTask = nil }
+        let isCurrent = generation == privacyGeneration
+        activeRequestLock.unlock()
+        return isCurrent ? result : nil
     }
 
     private func flushRequestHandler(_ base: String,
-                                     resource: Resource<OursResponse>,
-                                     completion: @escaping @Sendable (Bool) -> Void) {
-
-        Network.apiRequest(base: base, resource: resource,
+                                     resource: Resource<IngestBatchResult>,
+                                     generation: UInt64,
+                                     completion: @escaping @Sendable (IngestBatchResult?) -> Void) -> URLSessionDataTask? {
+        let task = Network.makeRequestTask(base: base, resource: resource,
             failure: { (reason, _, response) in
+                guard self.isCurrentRequest(generation) else { completion(nil); return }
                 self.networkConsecutiveFailures += 1
                 self.updateRetryDelay(response)
                 OursPrivacyLogger.warn(message: "API request to \(resource.path) has failed with reason \(reason)")
-                completion(false)
+                completion(nil)
             }, success: { (result, response) in
+                guard self.isCurrentRequest(generation) else { completion(nil); return }
                 self.networkConsecutiveFailures = 0
                 self.updateRetryDelay(response)
-                if result.success == false {
-                    OursPrivacyLogger.info(message: "\(base) api request faield")
-                }
-                completion(true)
+                completion(result)
             })
+        if task == nil { completion(nil) }
+        return task
     }
 
     private func updateRetryDelay(_ response: URLResponse?) {

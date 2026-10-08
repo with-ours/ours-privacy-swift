@@ -8,8 +8,12 @@
 import Foundation
 
 protocol FlushDelegate: AnyObject {
-    func flush(performFullFlush: Bool, completion: (@Sendable () -> Void)?)
-    func flushSuccess(type: FlushType, ids: [Int32])
+    func flushAutomatically(performFullFlush: Bool, completion: (@Sendable () -> Void)?)
+    func canFlushBatch(type: FlushType, rows: Queue) -> Bool
+    func acknowledgeFlush(type: FlushType, rowIDs: [String]) -> Bool
+    func hasIndexedIngestMode() -> Bool
+    func persistIndexedIngestMode() -> Bool
+    func reportIngestRejection(distinctId: String, code: String)
     func flushEnvelopeContext() -> (token: String, isManuallySetId: Bool)
 }
 
@@ -44,7 +48,7 @@ class Flush: AppLifecycle, @unchecked Sendable {
             flushRequestReadWriteLock.sync(flags: .barrier) {
                 _flushInterval = newValue
             }
-            delegate?.flush(performFullFlush: false, completion: nil)
+            delegate?.flushAutomatically(performFullFlush: false, completion: nil)
             startFlushTimer()
         }
     }
@@ -86,7 +90,7 @@ class Flush: AppLifecycle, @unchecked Sendable {
     }
 
     @objc func flushSelector() {
-        delegate?.flush(performFullFlush: false, completion: nil)
+        delegate?.flushAutomatically(performFullFlush: false, completion: nil)
     }
 
     func stopFlushTimer() {
@@ -98,22 +102,22 @@ class Flush: AppLifecycle, @unchecked Sendable {
 
     /// Drains the queue in `flushBatchSize` chunks. Each chunk becomes one
     /// `/ingest` POST body of shape `{token, is_manually_set_id, data: [items]}`.
-    /// On success we delete the chunk's SQLite row IDs and continue; on failure
+    /// On success we delete the chunk's local rows and continue; on failure
     /// we stop so a retry can pick up where this attempt left off.
     func flushQueueInBatches(_ queue: Queue, type: FlushType, headers: [String: String], queryItems: [URLQueryItem]) {
         guard let context = delegate?.flushEnvelopeContext() else { return }
+        let generation = flushRequest.requestGeneration
 
         var mutableQueue = queue
         while !mutableQueue.isEmpty {
             let batchSize = min(mutableQueue.count, flushBatchSize)
             let batch = Array(mutableQueue.prefix(batchSize))
-            let ids: [Int32] = batch.compactMap { $0["id"] as? Int32 }
+            let rowIDs = batch.compactMap { $0[OursPrivacyPersistence.localRowIDKey] as? String }
 
-            // Strip the SQLite `id` column from each item — it's local state, not
-            // part of the wire schema.
             let items = batch.map { row -> InternalProperties in
                 var copy = row
                 copy.removeValue(forKey: "id")
+                copy.removeValue(forKey: OursPrivacyPersistence.localRowIDKey)
                 return copy
             }
 
@@ -129,16 +133,43 @@ class Flush: AppLifecycle, @unchecked Sendable {
                 continue
             }
 
-            let success = flushRequest.sendRequest(requestData,
-                                                   type: type,
-                                                   headers: headers,
-                                                   queryItems: queryItems)
-            if success {
-                delegate?.flushSuccess(type: type, ids: ids)
-                mutableQueue.removeFirst(batchSize)
-            } else {
+            guard rowIDs.count == batch.count, delegate?.canFlushBatch(type: type, rows: batch) == true else {
                 break
             }
+            guard let result = flushRequest.sendRequest(requestData,
+                                                        type: type,
+                                                        headers: headers,
+                                                        queryItems: queryItems,
+                                                        generation: generation),
+                  result.success else { break }
+            if result.isIndexed {
+                guard let accepted = result.accepted, let rejected = result.rejected,
+                      accepted >= 0, accepted <= batch.count,
+                      rejected.count == batch.count - accepted else { break }
+                var indexes = Set<Int>()
+                var callbacks: [(String, String)] = []
+                for rejection in rejected {
+                    guard rejection.index >= 0, rejection.index < batch.count,
+                          indexes.insert(rejection.index).inserted,
+                          !rejection.code.isEmpty,
+                          let distinctId = batch[rejection.index]["distinct_id"] as? String,
+                          !distinctId.isEmpty else {
+                        callbacks.removeAll()
+                        break
+                    }
+                    callbacks.append((distinctId, rejection.code))
+                }
+                guard callbacks.count == rejected.count,
+                      delegate?.persistIndexedIngestMode() == true,
+                      delegate?.acknowledgeFlush(type: type, rowIDs: rowIDs) == true else { break }
+                for (distinctId, code) in callbacks {
+                    delegate?.reportIngestRejection(distinctId: distinctId, code: code)
+                }
+            } else {
+                guard delegate?.hasIndexedIngestMode() == false,
+                      delegate?.acknowledgeFlush(type: type, rowIDs: rowIDs) == true else { break }
+            }
+            mutableQueue.removeFirst(batchSize)
         }
     }
 

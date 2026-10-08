@@ -20,6 +20,7 @@ struct EventContext {
     let userCustomProperties: [String: Any]
     let userConsentProperties: [String: Any]
     let attributionDefaultProperties: [String: Any]
+    var mobileSnapshot: MobileSessionSnapshot?
 }
 
 class Track {
@@ -43,8 +44,10 @@ class Track {
         } else {
             OursPrivacyLogger.info(message: "oursprivacy track called with empty event parameter. using 'op_event'")
         }
-        if !(oursprivacyInstance?.trackAutomaticEventsEnabled ?? false) && name.hasPrefix("$ae_") {
-            // Caller has automatic events disabled — drop the AE event silently.
+        guard !name.hasPrefix("$mobile_") else { return [:] }
+        if name == "$ae_iap" {
+            guard oursprivacyInstance?.trackAutomaticPurchasesEnabled == true else { return [:] }
+        } else if name.hasPrefix("$ae_") && !(oursprivacyInstance?.trackAutomaticEventsEnabled ?? false) {
             return [:]
         }
         assertPropertyTypes(eventProperties)
@@ -77,6 +80,9 @@ class Track {
         var defaultProperties: InternalProperties = [:]
         defaultProperties += AutomaticProperties.defaultProperties
         defaultProperties += context.attributionDefaultProperties
+        if let snapshot = context.mobileSnapshot {
+            defaultProperties += snapshot.defaultProperties
+        }
 
         let item: InternalProperties = [
             "event": name,
@@ -106,6 +112,9 @@ class Track {
         var defaultProperties: InternalProperties = [:]
         defaultProperties += AutomaticProperties.defaultProperties
         defaultProperties += context.attributionDefaultProperties
+        if let snapshot = context.mobileSnapshot {
+            defaultProperties += snapshot.defaultProperties
+        }
 
         return [
             "event": "$identify",
@@ -114,6 +123,21 @@ class Track {
             "eventProperties": NSNull(),
             "userProperties": merged ?? NSNull(),
             "defaultProperties": defaultProperties
+        ]
+    }
+
+    func composeMobileFact(_ fact: MobileFact) -> InternalProperties {
+        let allowed = Set(["device_vendor", "device_model", "device_type", "os_name",
+                           "os_version", "screen_width", "screen_height", "version"])
+        var defaults = AutomaticProperties.defaultProperties.filter { allowed.contains($0.key) }
+        defaults += fact.defaultProperties
+        return [
+            "event": fact.name,
+            "visitor_id": fact.visitorId,
+            "distinct_id": fact.distinctId,
+            "eventProperties": fact.properties.isEmpty ? NSNull() : fact.properties,
+            "userProperties": NSNull(),
+            "defaultProperties": defaults
         ]
     }
 
@@ -134,12 +158,13 @@ class Track {
         let havePerCallConsent = !perCallConsent.isEmpty
 
         if !haveDefaultCustom && !haveDefaultConsent {
-            // Fast path — no store-level defaults configured. Pass per-call
-            // through unchanged (still null if caller passed nothing).
+            // Fast path — no store-level defaults configured. Keep per-call
+            // properties except empty consent (still null if nothing remains).
             guard let perCall = perCall, !perCall.isEmpty else { return nil }
             var out: InternalProperties = [:]
             for (k, v) in perCall { out[k] = v }
-            return out
+            if !havePerCallConsent { out.removeValue(forKey: "consent") }
+            return out.isEmpty ? nil : out
         }
 
         if !havePerCall && !haveDefaultCustom && !haveDefaultConsent {

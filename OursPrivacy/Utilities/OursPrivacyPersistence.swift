@@ -27,6 +27,8 @@ struct OursPrivacyUserDefaultsKeys {
     static let visitorId = "OPVisitorId"
     static let isManuallySetId = "OPIsManuallySetId"
     static let eventQueue = "OPEventQueue"
+    static let privacyClearPending = "OPPrivacyClearPending"
+    static let indexedIngestMode = "OPIndexedIngestMode"
 
     // Legacy keys (pre-canonical) — read once on first canonical launch so
     // they can be cleaned up, then never written again.
@@ -50,15 +52,33 @@ struct OursPrivacyUserDefaultsKeys {
 /// separately under their own ``UserDefaults`` keys.
 class OursPrivacyPersistence {
 
+    static let localRowIDKey = "op_local_row_id"
     let instanceName: String
 
     private let queueLock = ReadWriteLock(label: "com.oursprivacy.persistence.queue")
     private var inMemoryQueue: [InternalProperties] = []
     private var nextId: Int32 = 1
+    private var firstOpenQueueEvidence = false
+    private var privacyClearPending: Bool
+    private let defaults: UserDefaults?
+    var persistenceWrite: (Data) -> Bool
 
     init(instanceName: String) {
         self.instanceName = instanceName
+        let defaults = UserDefaults(suiteName: OursPrivacyUserDefaultsKeys.suiteName)
+        self.defaults = defaults
+        let prefix = "\(OursPrivacyUserDefaultsKeys.prefix)-\(instanceName)-"
+        privacyClearPending = defaults?.bool(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.privacyClearPending)") ?? false
+        let key = "\(prefix)\(OursPrivacyUserDefaultsKeys.eventQueue)"
+        persistenceWrite = { data in
+            guard let defaults else { return false }
+            defaults.set(data, forKey: key)
+            return defaults.synchronize() && defaults.data(forKey: key) == data
+        }
         loadQueueFromDefaults()
+        if privacyClearPending {
+            _ = clearEntitiesForPrivacy()
+        }
     }
 
     deinit {}
@@ -67,15 +87,24 @@ class OursPrivacyPersistence {
     /// implementation. The in-memory queue has no connection to close.
     func closeDB() {}
 
-    func saveEntity(_ entity: InternalProperties, type: PersistenceType, flag: Bool = false) {
-        guard type == .events else { return }
+    @discardableResult
+    func saveEntity(_ entity: InternalProperties, type: PersistenceType, flag: Bool = false,
+                    firstOpen: Bool = false) -> Bool {
+        guard type == .events else { return false }
+        var saved = false
         queueLock.write {
             var item = entity
             item["id"] = nextId
-            nextId &+= 1
-            inMemoryQueue.append(item)
+            item[Self.localRowIDKey] = UUID().uuidString
+            let proposal = inMemoryQueue + [item]
+            if persistQueueToDefaults(proposal, firstOpenAccepted: firstOpenQueueEvidence || firstOpen) {
+                inMemoryQueue = proposal
+                nextId &+= 1
+                firstOpenQueueEvidence = firstOpenQueueEvidence || firstOpen
+                saved = true
+            }
         }
-        persistQueueToDefaults()
+        return saved
     }
 
     func saveEntities(_ entities: Queue, type: PersistenceType, flag: Bool = false) {
@@ -87,12 +116,17 @@ class OursPrivacyPersistence {
     func loadEntitiesInBatch(type: PersistenceType,
                              batchSize: Int = Int.max,
                              flag: Bool = false,
-                             excludeAutomaticEvents: Bool = false) -> [InternalProperties] {
+                             excludeAutomaticEvents: Bool = false,
+                             excludeAutomaticPurchases: Bool = false) -> [InternalProperties] {
         guard type == .events else { return [] }
         var snapshot: [InternalProperties] = []
         queueLock.read { snapshot = inMemoryQueue }
-        if excludeAutomaticEvents {
-            snapshot = snapshot.filter { !(($0["event"] as? String) ?? "").hasPrefix("$ae_") }
+        if excludeAutomaticEvents || excludeAutomaticPurchases {
+            snapshot = snapshot.filter { item in
+                let name = item["event"] as? String ?? ""
+                if name == "$ae_iap" { return !excludeAutomaticPurchases }
+                return !excludeAutomaticEvents || !name.hasPrefix("$ae_")
+            }
         }
         if batchSize == Int.max { return snapshot }
         return Array(snapshot.prefix(batchSize))
@@ -102,22 +136,99 @@ class OursPrivacyPersistence {
         guard type == .events else { return }
         let toRemove = Set(ids)
         queueLock.write {
-            inMemoryQueue.removeAll { item in
+            var proposal = inMemoryQueue
+            proposal.removeAll { item in
                 guard let id = (item["id"] as? Int32) ?? (item["id"] as? NSNumber)?.int32Value else {
                     return false
                 }
                 return toRemove.contains(id)
             }
+            if persistQueueToDefaults(proposal, firstOpenAccepted: firstOpenQueueEvidence) {
+                inMemoryQueue = proposal
+            }
         }
-        persistQueueToDefaults()
+    }
+
+    func containsFlushRows(_ rows: Queue) -> Bool {
+        var current = false
+        queueLock.read {
+            guard !privacyClearPending, !rows.isEmpty else { return }
+            let liveIDs = Set(inMemoryQueue.compactMap { $0[Self.localRowIDKey] as? String })
+            current = rows.allSatisfy { row in
+                guard let id = row[Self.localRowIDKey] as? String else { return false }
+                return liveIDs.contains(id)
+            }
+        }
+        return current
+    }
+
+    func removeFlushedRows(_ rowIDs: [String], type: PersistenceType) -> Bool {
+        guard type == .events, !rowIDs.isEmpty else { return false }
+        let toRemove = Set(rowIDs)
+        guard toRemove.count == rowIDs.count else { return false }
+        var removed = false
+        queueLock.write {
+            guard !privacyClearPending else { return }
+            let liveIDs = Set(inMemoryQueue.compactMap { $0[Self.localRowIDKey] as? String })
+            guard toRemove.isSubset(of: liveIDs) else { return }
+            let proposal = inMemoryQueue.filter { row in
+                guard let id = row[Self.localRowIDKey] as? String else { return true }
+                return !toRemove.contains(id)
+            }
+            if persistQueueToDefaults(proposal, firstOpenAccepted: firstOpenQueueEvidence) {
+                inMemoryQueue = proposal
+                removed = true
+            }
+        }
+        return removed
+    }
+
+    var hasIndexedIngestMode: Bool {
+        defaults?.bool(forKey: indexedIngestModeKey()) ?? false
+    }
+
+    func persistIndexedIngestMode() -> Bool {
+        guard let defaults else { return false }
+        defaults.set(true, forKey: indexedIngestModeKey())
+        return defaults.synchronize() && defaults.bool(forKey: indexedIngestModeKey())
     }
 
     func resetEntities() {
         queueLock.write {
+            if persistQueueToDefaults([], firstOpenAccepted: firstOpenQueueEvidence) {
+                inMemoryQueue.removeAll()
+                nextId = 1
+            }
+        }
+    }
+
+    @discardableResult
+    func clearEntitiesForPrivacy() -> Bool {
+        var cleared = false
+        queueLock.write {
+            privacyClearPending = true
+            guard persistPrivacyClearPending(true) else { return }
+            guard persistQueueToDefaults([], firstOpenAccepted: firstOpenQueueEvidence) else { return }
             inMemoryQueue.removeAll()
             nextId = 1
+            if persistPrivacyClearPending(false) {
+                privacyClearPending = false
+                cleared = true
+            }
         }
-        persistQueueToDefaults()
+        return cleared
+    }
+
+    var hasPendingPrivacyClear: Bool {
+        var pending = false
+        queueLock.read { pending = privacyClearPending }
+        return pending
+    }
+
+    var hasFirstOpenQueueEvidence: Bool {
+        var result = false
+        queueLock.read { result = firstOpenQueueEvidence }
+        return result
     }
 
     // MARK: - Queue (de)serialization
@@ -127,39 +238,66 @@ class OursPrivacyPersistence {
         return "\(prefix)\(OursPrivacyUserDefaultsKeys.eventQueue)"
     }
 
+    private func privacyClearKey() -> String {
+        "\(OursPrivacyUserDefaultsKeys.prefix)-\(instanceName)-\(OursPrivacyUserDefaultsKeys.privacyClearPending)"
+    }
+
+    private func indexedIngestModeKey() -> String {
+        "\(OursPrivacyUserDefaultsKeys.prefix)-\(instanceName)-\(OursPrivacyUserDefaultsKeys.indexedIngestMode)"
+    }
+
+    private func persistPrivacyClearPending(_ required: Bool) -> Bool {
+        guard let defaults else { return false }
+        defaults.set(required, forKey: privacyClearKey())
+        return defaults.synchronize() && defaults.bool(forKey: privacyClearKey()) == required
+    }
+
     private func loadQueueFromDefaults() {
         guard let defaults = UserDefaults(suiteName: OursPrivacyUserDefaultsKeys.suiteName) else {
             return
         }
         guard let data = defaults.data(forKey: queueKey()) else { return }
-        guard let array = JSONHandler.deserializeData(data) as? [InternalProperties] else { return }
+        let decoded = JSONHandler.deserializeData(data)
+        let array: [InternalProperties]
+        if let legacy = decoded as? [InternalProperties] {
+            array = legacy
+        } else if let blob = decoded as? [String: Any],
+                  let events = blob["events"] as? [InternalProperties] {
+            array = events
+            firstOpenQueueEvidence = blob["firstOpenAccepted"] as? Bool ?? false
+        } else {
+            return
+        }
 
+        var seenIDs = Set<String>()
+        let hydrated = array.map { row -> InternalProperties in
+            var item = row
+            if let id = item[Self.localRowIDKey] as? String, !id.isEmpty, seenIDs.insert(id).inserted {
+                return item
+            }
+            let id = UUID().uuidString
+            item[Self.localRowIDKey] = id
+            seenIDs.insert(id)
+            return item
+        }
         queueLock.write {
-            inMemoryQueue = array
+            inMemoryQueue = hydrated
             // Rebuild the id counter so newly appended items don't collide
             // with anything we just hydrated.
-            let maxId = array.compactMap {
+            let maxId = hydrated.compactMap {
                 ($0["id"] as? Int32) ?? ($0["id"] as? NSNumber)?.int32Value
             }.max() ?? 0
             nextId = maxId &+ 1
         }
     }
 
-    private func persistQueueToDefaults() {
-        guard let defaults = UserDefaults(suiteName: OursPrivacyUserDefaultsKeys.suiteName) else {
-            return
-        }
-        var snapshot: [InternalProperties] = []
-        queueLock.read { snapshot = inMemoryQueue }
-        if snapshot.isEmpty {
-            defaults.removeObject(forKey: queueKey())
-            return
-        }
-        guard let data = JSONHandler.serializeJSONObject(snapshot) else {
+    private func persistQueueToDefaults(_ events: [InternalProperties], firstOpenAccepted: Bool) -> Bool {
+        let blob: [String: Any] = ["events": events, "firstOpenAccepted": firstOpenAccepted]
+        guard let data = JSONHandler.serializeJSONObject(blob) else {
             OursPrivacyLogger.warn(message: "failed to serialize event queue for persistence")
-            return
+            return false
         }
-        defaults.set(data, forKey: queueKey())
+        return persistenceWrite(data)
     }
 
     // MARK: - One-shot legacy cleanup
@@ -255,7 +393,7 @@ class OursPrivacyPersistence {
         return OursPrivacyIdentity(visitorId: visitorId, isManuallySetId: isManuallySetId)
     }
 
-    static func deleteUserDefaultsData(instanceName: String) {
+    static func deleteUserDefaultsData(instanceName: String, preserveEventQueue: Bool = false) {
         guard let defaults = UserDefaults(suiteName: OursPrivacyUserDefaultsKeys.suiteName) else {
             return
         }
@@ -263,7 +401,11 @@ class OursPrivacyPersistence {
         defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.visitorId)")
         defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.isManuallySetId)")
         defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.optOutStatus)")
-        defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.eventQueue)")
+        if !preserveEventQueue {
+            defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.eventQueue)")
+            defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.privacyClearPending)")
+            defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.indexedIngestMode)")
+        }
         defaults.synchronize()
     }
 }

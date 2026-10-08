@@ -38,6 +38,7 @@ class Recorder(BaseHTTPRequestHandler):
         ts = time.strftime("%Y%m%dT%H%M%S")
         name = f"{ts}-{Recorder.seq:04d}{self.path.replace('/', '_') or '_root'}.json"
         path = os.path.join(Recorder.out_dir, name)
+        body = None
         try:
             body = json.loads(raw)
             pretty = json.dumps(body, indent=2, sort_keys=True)
@@ -47,10 +48,19 @@ class Recorder(BaseHTTPRequestHandler):
         with open(path, "w") as f:
             f.write(pretty)
         print(f"[recorder] {self.command} {self.path} -> {path}", flush=True)
+        response = {
+            "success": True,
+            "visitor_id": "recorder-visitor",
+            "accepted": len(body["data"]) if isinstance(body, dict)
+            and isinstance(body.get("data"), list) else 0,
+            "rejected": [],
+        }
+        encoded = json.dumps(response).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
-        self.wfile.write(b'{"status":"ok"}')
+        self.wfile.write(encoded)
 
     def log_message(self, *args):  # silence default access log
         pass

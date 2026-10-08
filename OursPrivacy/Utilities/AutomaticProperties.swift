@@ -21,7 +21,15 @@ import WatchKit
 /// `martech/packages/types/src/event.ts`. Unknown keys are stripped server-side,
 /// so anything added here without a matching schema field is dead weight.
 class AutomaticProperties {
-    static let sdkVersion = "3.0.0"
+    static let sdkVersion = "3.1.0"
+
+    static var appVersion: String? {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+    }
+
+    static var appBuild: String? {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+    }
 
     static var defaultProperties: InternalProperties {
         var p = InternalProperties()
@@ -60,6 +68,7 @@ class AutomaticProperties {
     private final class UIPropertiesCache: @unchecked Sendable {
         private let lock = NSLock()
         private var snapshot: UIPropertiesSnapshot?
+        private var pendingQueues: [DispatchQueue] = []
 
         func read() -> UIPropertiesSnapshot? {
             lock.lock()
@@ -71,6 +80,20 @@ class AutomaticProperties {
             lock.lock()
             defer { lock.unlock() }
             snapshot = value
+        }
+
+        func addPendingQueue(_ queue: DispatchQueue) {
+            lock.lock()
+            defer { lock.unlock() }
+            pendingQueues.append(queue)
+        }
+
+        func resumePendingQueues() {
+            lock.lock()
+            let queues = pendingQueues
+            pendingQueues.removeAll()
+            lock.unlock()
+            for queue in queues { queue.resume() }
         }
     }
 
@@ -84,15 +107,16 @@ class AutomaticProperties {
         // Gate the first event (including automatic events) without blocking its caller
         // or reordering track, identify, opt-out, and flush operations.
         queue.suspend()
+        uiPropertiesCache.addPendingQueue(queue)
         DispatchQueue.main.async {
             primeUIPropertiesIfOnMain()
-            queue.resume()
         }
     }
 
     static func primeUIPropertiesIfOnMain() {
         guard Thread.isMainThread else { return }
         _ = uiProperties()
+        uiPropertiesCache.resumePendingQueues()
     }
 
     private static func uiProperties() -> InternalProperties {
