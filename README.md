@@ -117,7 +117,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         op = OursPrivacy(token: "YOUR_API_TOKEN", trackAutomaticEvents: true)
         Task {
             await op.initialize(options: OursPrivacyInitOptions(
-                defaultEventProperties: ["app_version": "2.0.0"]
+                defaultEventProperties: ["app_section": "main"]
             ))
         }
         return true
@@ -168,7 +168,7 @@ Apply boot-time options and start the flush timer. Call once, immediately after 
 |-------|------|-------------|
 | `optedOutByDefault` | `Bool` | If `true`, tracking starts opted out (default: `false`) |
 | `trackAutomaticPurchases` | `Bool?` | Override the constructor's purchase choice at boot; omitted keeps it unchanged (default: `false`) |
-| `onIngestRejected` | `(@Sendable (String, String) -> Void)?` | Called with an event's `distinct_id` and rejection code after the rejected batch leaves the durable queue |
+| `onIngestRejected` | `(@Sendable (String, String) -> Void)?` | Optional callback for indexed rejections, with `distinct_id` and the server-provided code after durable queue removal |
 | `visitorId` | `String` | Pre-set the visitor ID; sets `is_manually_set_id: true` on all events |
 | `defaultEventProperties` | `[String: OursPrivacyType]` | Properties merged into `eventProperties` on every `track()` call |
 | `defaultUserCustomProperties` | `[String: OursPrivacyType]` | Properties merged into `userProperties.custom_properties` on every event |
@@ -186,7 +186,7 @@ await op.initialize()
 await op.initialize(options: OursPrivacyInitOptions(
     serverURL: nil,
     visitorId: "pre-known-id",
-    defaultEventProperties: ["platform": "ios", "app_version": "2.0.0"],
+    defaultEventProperties: ["app_section": "main"],
     defaultUserCustomProperties: ["tier": "pro"],
     defaultUserConsentProperties: ["marketing": true]
 ))
@@ -237,15 +237,21 @@ Use fixed developer-chosen labels of 1–80 ASCII characters matching `^[A-Za-z]
 
 | Canonical event | When emitted on iOS | `eventProperties` |
 | --- | --- | --- |
-| `$mobile_first_open` | First eligible tracked foreground open for this installation and token, once | `null` |
-| `$mobile_app_open` | Each foreground entry, including cold and warm opens | `null` |
-| `$mobile_session_start` | First tracked foreground entry in a new session, once per `sid` | `null` |
+| `$mobile_first_open` | First eligible tracked foreground open for this installation and token, once | SDK metadata |
+| `$mobile_app_open` | Each foreground entry, including cold and warm opens | SDK metadata |
+| `$mobile_session_start` | First tracked foreground entry in a new session, once per `sid` | SDK metadata |
 | `$mobile_session_engagement` | A positive measured foreground-time delta at a checkpoint, screen change, or pause/background | Required positive integer `engagement_duration_ms` in milliseconds; `screen_name` when a tracked screen is active |
-| `$mobile_session_end` | Best effort when an expired session is observed on a later foreground entry; it can be absent | `null` |
+| `$mobile_session_end` | Best effort when an expired session is observed on a later foreground entry; it can be absent | SDK metadata |
 | `$mobile_app_update` | A later tracked open after the observed app version or build changes, never the first observed open | `previous_app_version` and `previous_app_build` when previously known |
 | `$mobile_screen_view` | A valid explicit `trackScreen` transition; repeated active labels are suppressed | Required `screen_name`; no `screen_class` is collected by the explicit Swift API |
 
-Every iOS mobile event, including manual `track()` and `trackScreen()`, has SDK-owned `defaultProperties.sid` (a session ID), `mobile_session_started_at`, `mobile_occurred_at`, `mobile_platform: "ios"`, and `mobile_contract_version: 1`, plus `app_version` and `app_build` when the host bundle supplies them. Canonical facts also have `device_vendor` and `version`, plus `device_model`, `device_type`, `os_name`, `os_version`, `screen_width`, and `screen_height` when available. `version` is the SDK version, not the app version. Timestamps are ISO-8601 UTC with exactly three fractional digits and `Z`; `mobile_occurred_at` is captured when the event is queued and is no earlier than its session start. The SDK does not set top-level `time`. Foregrounding at or after 30 minutes of inactivity starts a new `sid`; a warm open under 30 minutes keeps it. Engagement uses nonoverlapping, positive integer millisecond deltas from a monotonic clock; 10 seconds accumulated within a session meets the engaged threshold. Reset, visitor-ID change, and opt-out discard the session; opt-out clears queued events and suppresses manual screens, lifecycle facts, and purchases.
+On iOS, canonical facts, manual `track()` events, and `identify()` include SDK-owned `eventProperties.mobile_contract_version: 1` and `mobile_occurred_at`, plus `app_version` and `app_build` when available. `mobile_occurred_at` uses UTC ISO-8601 with three fractional digits and `Z`. `defaultProperties.sid` is the 13-digit decimal string of session-start milliseconds; device, OS, and SDK `version` metadata remain in defaults. `mobile_session_started_at` and `mobile_platform` are omitted. SDK metadata overrides caller values.
+
+Event properties support 200 keys and compact JSON shorter than 1,048,576 UTF-16 code units. Up to 196 ordinary properties leave key capacity for all four mobile metadata fields. If metadata would exceed either limit, manual events keep every ordinary property and omit common mobile metadata; those events upload without a mobile contract version and do not appear in Mobile Analytics.
+
+A warm open retains its session; 30 minutes of inactivity starts a new one. Engagement records positive, nonoverlapping monotonic millisecond deltas. Reset, visitor-ID change, and opt-out discard the session; opt-out clears queued events. Upgrades restart stored UUID sessions without repeating first-open and migrate pending events while preserving their identity and properties.
+
+Setting the current visitor ID explicitly keeps the session ID, settles accrued engagement under the previous identity mode, and uses explicit identity for later events. Previously captured events keep their identity mode.
 
 Canonical facts carry only SDK lifecycle metadata and stable screen labels. They have `userProperties: null`, never merge caller default or per-call event/user properties, and collect no patient fields, advertising IDs, or raw URL. Screen labels and manual event properties are developer-controlled, so keep them free of patient data and route parameters. The mobile contract applies to iOS app runtime; on macOS, tvOS, visionOS, watchOS, and iOS apps running on Mac, `trackScreen` emits no canonical fact and ordinary manual events continue without mobile session metadata.
 
@@ -320,7 +326,7 @@ Push all queued events to the server immediately. Useful before app close or log
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `performFullFlush` | `Bool` | No | Ignore the batch size cap and send everything in one request (default: `false`) |
+| `performFullFlush` | `Bool` | No | Drain all batches, preserving visitor boundaries (default: `false`) |
 | `completion` | `(() -> Void)?` | No | Called after the flush completes |
 
 **Returns:** `Void`
@@ -329,8 +335,9 @@ Push all queued events to the server immediately. Useful before app close or log
 op.flush()
 ```
 
-An indexed `/ingest` response acknowledges accepted and rejected items together. Set
-`onIngestRejected` in `OursPrivacyInitOptions` or on the instance to handle rejected events:
+If the server provides an indexed `/ingest` response, accepted and rejected items are
+acknowledged together. The optional `onIngestRejected` callback receives server-provided
+codes; the SDK does not define rejection codes:
 
 ```swift
 await op.initialize(options: OursPrivacyInitOptions(
@@ -345,8 +352,9 @@ The callback runs on the SDK network queue after queue removal succeeds. It rece
 `$distinct_id`, so the ID may contain patient data; log only the code. Keep callback
 work brief or dispatch it to your app's queue. Transport
 failures and malformed or stale responses retain queued events without invoking it.
-Legacy no-index responses can acknowledge batches until this source token has received
-an indexed response; indexed mode persists across app restarts.
+The legacy `{success: true, visitor_id: "..."}` response also acknowledges batches after
+an indexed response. Each batch contains one captured visitor ID and identity mode;
+older queued events use the current identity mode when no captured mode is stored.
 
 ---
 
@@ -387,7 +395,7 @@ Merge properties into `eventProperties` on every future `track()` call. Properti
 ```swift
 // At init time:
 await op.initialize(options: OursPrivacyInitOptions(
-    defaultEventProperties: ["app_version": "2.0.0", "environment": "production"]
+    defaultEventProperties: ["app_section": "main"]
 ))
 
 // Or post-init (e.g. after fetching user data):

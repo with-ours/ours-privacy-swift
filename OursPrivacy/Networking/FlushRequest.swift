@@ -46,6 +46,7 @@ struct IngestBatchResult: Decodable, Sendable {
         let hasRejected = object.keys.contains("rejected")
         guard hasAccepted == hasRejected else { return nil }
         if hasAccepted && !result.isIndexed { return nil }
+        if !hasAccepted && Set(object.keys) != Set(["success", "visitor_id"]) { return nil }
         return result
     }
 }

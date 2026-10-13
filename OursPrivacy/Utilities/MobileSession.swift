@@ -36,16 +36,18 @@ struct MobileSessionSnapshot {
     let occurredAtMs: Int64
     let appVersion: String?
     let appBuild: String?
+    var isManuallySetId: Bool?
 
     var startedAtISO: String { mobileISOTime(startedAtMs) }
     var occurredAtISO: String { mobileISOTime(occurredAtMs) }
 
     var defaultProperties: [String: Any] {
+        ["sid": sid]
+    }
+
+    var eventProperties: [String: Any] {
         var properties: [String: Any] = [
-            "sid": sid,
-            "mobile_session_started_at": startedAtISO,
             "mobile_occurred_at": occurredAtISO,
-            "mobile_platform": "ios",
             "mobile_contract_version": 1
         ]
         if let appVersion = appVersion { properties["app_version"] = appVersion }
@@ -60,9 +62,10 @@ struct MobileFact: Codable {
     let visitorId: String
     let appVersion: String?
     let appBuild: String?
-    let sid: String
+    var sid: String
     let startedAtMs: Int64
     let occurredAtMs: Int64
+    let isManuallySetId: Bool?
     private let values: [String: MobileValue]
 
     fileprivate init(name: String, distinctId: String, snapshot: MobileSessionSnapshot,
@@ -75,12 +78,19 @@ struct MobileFact: Codable {
         sid = snapshot.sid
         startedAtMs = snapshot.startedAtMs
         occurredAtMs = snapshot.occurredAtMs
+        isManuallySetId = snapshot.isManuallySetId
         self.values = values
     }
 
     var startedAtISO: String { mobileISOTime(startedAtMs) }
     var occurredAtISO: String { mobileISOTime(occurredAtMs) }
-    var properties: [String: Any] { values.mapValues(\.wireValue) }
+    var properties: [String: Any] {
+        var properties = values.mapValues(\.wireValue)
+        properties += MobileSessionSnapshot(sid: sid, visitorId: visitorId, startedAtMs: startedAtMs,
+                                            occurredAtMs: occurredAtMs, appVersion: appVersion,
+                                            appBuild: appBuild).eventProperties
+        return properties
+    }
 
     var defaultProperties: [String: Any] {
         MobileSessionSnapshot(sid: sid, visitorId: visitorId, startedAtMs: startedAtMs,
@@ -109,6 +119,7 @@ final class MobileSession {
         var sessionVisitorId: String?
         var sessionAppVersion: String?
         var sessionAppBuild: String?
+        var sessionIsManuallySetId: Bool?
         var automaticStartSid: String?
         var foregroundDurationMs: Int64?
         var pendingFacts: [MobileFact] = []
@@ -132,6 +143,7 @@ final class MobileSession {
     private var activeVisitorId: String?
     private var activeAppVersion: String?
     private var activeAppBuild: String?
+    private var activeIsManuallySetId: Bool?
 
     init(instanceName: String, uuid: @escaping () -> UUID = UUID.init) {
         self.uuid = uuid
@@ -144,6 +156,15 @@ final class MobileSession {
             state = StoredState()
         }
         replayPendingOnForeground = !state.pendingFacts.isEmpty
+        if let sid = state.sid, sid != state.startedAtMs.map(String.init) {
+            clearSession()
+        }
+        state.pendingFacts = state.pendingFacts.map { fact in
+            var migrated = fact
+            migrated.sid = String(fact.startedAtMs)
+            return migrated
+        }
+        persist()
     }
 
     var pendingFacts: [MobileFact] {
@@ -162,6 +183,7 @@ final class MobileSession {
 
     func foreground(automaticEnabled: Bool, visitorId: String,
                     appVersion: String? = nil, appBuild: String? = nil,
+                    isManuallySetId: Bool? = nil,
                     at point: MobileTimePoint) -> [MobileFact] {
         withLock {
             if isForeground && (!automaticEnabled || handledAutomaticForeground) {
@@ -169,12 +191,14 @@ final class MobileSession {
             }
 
             let expired = ensureSession(at: point, visitorId: visitorId,
-                                        appVersion: appVersion, appBuild: appBuild)
+                                        appVersion: appVersion, appBuild: appBuild,
+                                        isManuallySetId: isManuallySetId)
             isForeground = true
             checkpointMonotonicMs = point.monotonicMs
             activeVisitorId = visitorId
             activeAppVersion = appVersion
             activeAppBuild = appBuild
+            activeIsManuallySetId = isManuallySetId
             state.lastActiveAtMs = max(point.epochMs, state.startedAtMs ?? point.epochMs)
 
             guard automaticEnabled else {
@@ -191,7 +215,7 @@ final class MobileSession {
                 facts.append(record("$mobile_session_end", snapshot: expired))
             }
             let snapshot = currentSnapshot(visitorId: visitorId, appVersion: appVersion,
-                                           appBuild: appBuild, at: point.epochMs)
+                                           appBuild: appBuild, isManuallySetId: isManuallySetId, at: point.epochMs)
             if !state.firstOpenAccepted &&
                 !state.pendingFacts.contains(where: { $0.name == "$mobile_first_open" }) {
                 facts.append(record("$mobile_first_open", snapshot: snapshot))
@@ -299,17 +323,19 @@ final class MobileSession {
 
     func screen(_ name: String, visitorId: String,
                 appVersion: String? = nil, appBuild: String? = nil,
+                isManuallySetId: Bool? = nil,
                 at point: MobileTimePoint) -> [MobileFact] {
         withLock {
             guard Self.isValidScreenName(name), name != activeScreen else { return [] }
             let previous = isForeground
                 ? engagement(at: point, force: true) : []
             _ = ensureSession(at: point, visitorId: visitorId,
-                              appVersion: appVersion, appBuild: appBuild)
+                              appVersion: appVersion, appBuild: appBuild,
+                              isManuallySetId: isManuallySetId)
             activeScreen = name
             state.lastActiveAtMs = max(point.epochMs, state.startedAtMs ?? point.epochMs)
             let snapshot = currentSnapshot(visitorId: visitorId, appVersion: appVersion,
-                                           appBuild: appBuild, at: point.epochMs)
+                                           appBuild: appBuild, isManuallySetId: isManuallySetId, at: point.epochMs)
             let fact = record("$mobile_screen_view", snapshot: snapshot,
                               values: ["screen_name": .text(name)])
             persist()
@@ -318,16 +344,18 @@ final class MobileSession {
     }
 
     func snapshot(visitorId: String, appVersion: String? = nil, appBuild: String? = nil,
+                  isManuallySetId: Bool? = nil,
                   at point: MobileTimePoint) -> MobileSessionSnapshot {
         withLock {
             if isForeground && isLargeRollback(at: point.epochMs) {
                 _ = engagement(at: point, force: true)
             }
             _ = ensureSession(at: point, visitorId: visitorId,
-                              appVersion: appVersion, appBuild: appBuild)
+                              appVersion: appVersion, appBuild: appBuild,
+                              isManuallySetId: isManuallySetId)
             state.lastActiveAtMs = max(point.epochMs, state.startedAtMs ?? point.epochMs)
             let result = currentSnapshot(visitorId: visitorId, appVersion: appVersion,
-                                         appBuild: appBuild, at: point.epochMs)
+                                         appBuild: appBuild, isManuallySetId: isManuallySetId, at: point.epochMs)
             persist()
             return result
         }
@@ -343,7 +371,19 @@ final class MobileSession {
         }
     }
 
+    func setIdentityMode(_ isManuallySetId: Bool, at point: MobileTimePoint) -> [MobileFact] {
+        withLock {
+            guard state.sessionIsManuallySetId != isManuallySetId else { return [] }
+            let facts = isForeground ? engagement(at: point, force: true) : []
+            activeIsManuallySetId = isManuallySetId
+            state.sessionIsManuallySetId = isManuallySetId
+            persist()
+            return facts
+        }
+    }
+
     func rotate(to visitorId: String, appVersion: String?, appBuild: String?,
+                isManuallySetId: Bool? = nil,
                 at point: MobileTimePoint) -> [MobileFact] {
         withLock {
             let wasForeground = isForeground
@@ -353,7 +393,8 @@ final class MobileSession {
             clearSession()
             if wasForeground {
                 _ = ensureSession(at: point, visitorId: visitorId,
-                                  appVersion: appVersion, appBuild: appBuild)
+                                  appVersion: appVersion, appBuild: appBuild,
+                                  isManuallySetId: isManuallySetId)
                 state.lastActiveAtMs = point.epochMs
                 isForeground = true
                 isPaused = wasPaused
@@ -362,6 +403,7 @@ final class MobileSession {
                 activeVisitorId = visitorId
                 activeAppVersion = appVersion
                 activeAppBuild = appBuild
+                activeIsManuallySetId = isManuallySetId
             }
             persist()
             return facts
@@ -421,6 +463,7 @@ final class MobileSession {
         state.sessionVisitorId = nil
         state.sessionAppVersion = nil
         state.sessionAppBuild = nil
+        state.sessionIsManuallySetId = nil
         state.automaticStartSid = nil
         state.foregroundDurationMs = nil
         isForeground = false
@@ -431,10 +474,12 @@ final class MobileSession {
         activeVisitorId = nil
         activeAppVersion = nil
         activeAppBuild = nil
+        activeIsManuallySetId = nil
     }
 
     private func ensureSession(at point: MobileTimePoint, visitorId: String,
-                               appVersion: String?, appBuild: String?) -> MobileSessionSnapshot? {
+                               appVersion: String?, appBuild: String?,
+                               isManuallySetId: Bool?) -> MobileSessionSnapshot? {
         var expired: MobileSessionSnapshot?
         if let sid = state.sid, let startedAtMs = state.startedAtMs,
            let lastActiveAtMs = state.lastActiveAtMs, !isForeground,
@@ -443,7 +488,8 @@ final class MobileSession {
             expired = MobileSessionSnapshot(sid: sid, visitorId: state.sessionVisitorId ?? visitorId,
                                             startedAtMs: startedAtMs, occurredAtMs: point.epochMs,
                                             appVersion: state.sessionAppVersion,
-                                            appBuild: state.sessionAppBuild)
+                                            appBuild: state.sessionAppBuild,
+                                            isManuallySetId: state.sessionIsManuallySetId)
         }
 
         let timedOut = !isForeground && state.lastActiveAtMs.map {
@@ -451,23 +497,25 @@ final class MobileSession {
         } ?? false
         if state.sid == nil || timedOut || isLargeRollback(at: point.epochMs) {
             clearSession()
-            state.sid = uuid().uuidString
+            state.sid = String(point.epochMs)
             state.startedAtMs = point.epochMs
             state.sessionVisitorId = visitorId
             state.sessionAppVersion = appVersion
             state.sessionAppBuild = appBuild
+            state.sessionIsManuallySetId = isManuallySetId
         }
         state.lastObservedWallMs = max(state.lastObservedWallMs ?? point.epochMs, point.epochMs)
         return expired
     }
 
     private func currentSnapshot(visitorId: String, appVersion: String?,
-                                 appBuild: String?, at epochMs: Int64) -> MobileSessionSnapshot {
+                                 appBuild: String?, isManuallySetId: Bool?, at epochMs: Int64) -> MobileSessionSnapshot {
         let startedAtMs = state.startedAtMs ?? epochMs
         return MobileSessionSnapshot(sid: state.sid ?? "", visitorId: visitorId,
                                      startedAtMs: startedAtMs,
                                      occurredAtMs: max(epochMs, startedAtMs),
-                                     appVersion: appVersion, appBuild: appBuild)
+                                     appVersion: appVersion, appBuild: appBuild,
+                                     isManuallySetId: isManuallySetId)
     }
 
     private func record(_ name: String, snapshot: MobileSessionSnapshot,
@@ -493,6 +541,7 @@ final class MobileSession {
         if let activeScreen = activeScreen { values["screen_name"] = .text(activeScreen) }
         let snapshot = currentSnapshot(visitorId: visitorId,
                                        appVersion: activeAppVersion, appBuild: activeAppBuild,
+                                       isManuallySetId: activeIsManuallySetId,
                                        at: point.epochMs)
         return [record("$mobile_session_engagement", snapshot: snapshot, values: values)]
     }

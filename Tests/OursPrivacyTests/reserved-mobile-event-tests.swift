@@ -56,7 +56,8 @@ final class ReservedMobileEventTests: XCTestCase {
         XCTAssertEqual(facts.compactMap { $0["event"] as? String },
                        ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start"])
         for fact in facts {
-            XCTAssertTrue(fact["eventProperties"] is NSNull)
+            XCTAssertEqual((fact["eventProperties"] as? [String: Any])?["mobile_contract_version"] as? Int, 1)
+            XCTAssertNil((fact["eventProperties"] as? [String: Any])?["private_marker"])
             XCTAssertTrue(fact["userProperties"] is NSNull)
             XCTAssertNil((fact["defaultProperties"] as? [String: Any])?["private_marker"])
         }

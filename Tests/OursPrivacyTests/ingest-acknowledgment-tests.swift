@@ -4,9 +4,11 @@ import XCTest
 private final class ScriptedIngestRequest: FlushRequest, @unchecked Sendable {
     var responses: [IngestBatchResult?]
     private(set) var sentServerURLs: [String] = []
+    private(set) var sentEnvelopes: [InternalProperties] = []
     let firstStarted = DispatchSemaphore(value: 0)
     let releaseFirst = DispatchSemaphore(value: 0)
     var holdFirst = false
+    var enforcePropertyCapacity = false
     private var calls = 0
 
     required init(serverURL: String) {
@@ -24,6 +26,15 @@ private final class ScriptedIngestRequest: FlushRequest, @unchecked Sendable {
                               generation: UInt64) -> IngestBatchResult? {
         calls += 1
         sentServerURLs.append(serverURL)
+        if let data = requestData.data(using: .utf8),
+           let envelope = try? JSONSerialization.jsonObject(with: data) as? InternalProperties {
+            sentEnvelopes.append(envelope)
+            if enforcePropertyCapacity, (envelope["data"] as? Queue ?? []).contains(where: {
+                guard let properties = $0["eventProperties"] as? InternalProperties else { return false }
+                guard let encoded = JSONHandler.encodeAPIData(properties) else { return true }
+                return properties.count > 200 || encoded.utf16.count >= 1_048_576
+            }) { return nil }
+        }
         if holdFirst && calls == 1 {
             firstStarted.signal()
             _ = releaseFirst.wait(timeout: .now() + 5)
@@ -50,6 +61,213 @@ private final class RejectionCapture: @unchecked Sendable {
 }
 
 extension OursPrivacyTests {
+    func testCallerBagNearSerializedSizeLimitAndFollowingEventBothUpload() async throws {
+        let op = makeMobileInstance()
+        op.flushInstance.delegate = nil
+        op.trackAutomaticEventsEnabled = false
+        await op.initialize()
+        let ordinary = ["field": String(repeating: "a", count: 1_048_563)]
+        XCTAssertEqual(try XCTUnwrap(JSONHandler.encodeAPIData(ordinary)).utf16.count, 1_048_575)
+        op.track(event: "large-booking", properties: ordinary.mapValues { $0 as OursPrivacyType })
+        op.track(event: "following-booking", properties: ["appointment_id": "visit-1"])
+        op.trackingQueue.sync {}
+        let success = ingestResult(#"{"success":true,"visitor_id":"visitor"}"#)
+        let request = ScriptedIngestRequest(responses: [success, success])
+        request.enforcePropertyCapacity = true
+        op.flushInstance.flushBatchSize = 1
+        op.flushInstance.flushRequest = request
+        op.flushInstance.delegate = op
+
+        op.flushQueue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events), type: .events)
+
+        XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+        let uploaded = request.sentEnvelopes.flatMap { $0["data"] as? Queue ?? [] }
+        XCTAssertEqual(uploaded.compactMap { $0["event"] as? String }, ["large-booking", "following-booking"])
+        let properties = try XCTUnwrap(uploaded.first?["eventProperties"] as? InternalProperties)
+        XCTAssertTrue(properties as NSDictionary == ordinary as NSDictionary)
+        XCTAssertEqual(try XCTUnwrap(JSONHandler.encodeAPIData(properties)).utf16.count, 1_048_575)
+        XCTAssertNotNil((uploaded.first?["defaultProperties"] as? InternalProperties)?["sid"] as? String)
+        XCTAssertEqual((uploaded.last?["eventProperties"] as? InternalProperties)?["mobile_contract_version"] as? Int, 1)
+        XCTAssertEqual((uploaded.last?["eventProperties"] as? InternalProperties)?["appointment_id"] as? String, "visit-1")
+    }
+
+    func testTwoHundredCallerPropertiesAndFollowingEventBothUpload() async throws {
+        let op = makeMobileInstance()
+        op.flushInstance.delegate = nil
+        op.trackAutomaticEventsEnabled = false
+        await op.initialize()
+        let ordinary = Dictionary(uniqueKeysWithValues: (0 ..< 200).map { ("field_\($0)", "value_\($0)") })
+        op.track(event: "large-booking", properties: ordinary.mapValues { $0 as OursPrivacyType })
+        op.track(event: "following-booking", properties: ["appointment_id": "visit-1"])
+        op.trackingQueue.sync {}
+        let request = ScriptedIngestRequest(responses: [ingestResult(#"{"success":true,"visitor_id":"visitor"}"#)])
+        request.enforcePropertyCapacity = true
+        op.flushInstance.flushRequest = request
+        op.flushInstance.delegate = op
+
+        op.flushQueue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events), type: .events)
+
+        XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+        let batch = try XCTUnwrap(request.sentEnvelopes.first?["data"] as? Queue)
+        XCTAssertEqual(batch.compactMap { $0["event"] as? String }, ["large-booking", "following-booking"])
+        XCTAssertEqual((batch.first?["eventProperties"] as? NSDictionary), ordinary as NSDictionary)
+        XCTAssertNotNil((batch.first?["defaultProperties"] as? InternalProperties)?["sid"] as? String)
+        XCTAssertEqual((batch.last?["eventProperties"] as? InternalProperties)?["mobile_contract_version"] as? Int, 1)
+        XCTAssertEqual((batch.last?["eventProperties"] as? InternalProperties)?["appointment_id"] as? String, "visit-1")
+    }
+
+    func testSameVisitorModeChangeSettlesOldEngagementAndPersistsNewMode() async throws {
+        let op = makeMobileInstance()
+        op.flushInstance.delegate = nil
+        await op.initialize()
+        let start = mobilePoint()
+        op.mobileQueueNowMs = { start.epochMs + 30_000 }
+        op.mobileForeground(at: start)
+        op.trackingQueue.sync {}
+        let visitor = try XCTUnwrap(op.getVisitorId())
+        let original = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let sid = try XCTUnwrap((original.first?["defaultProperties"] as? InternalProperties)?["sid"] as? String)
+        let persist = op.oursprivacyPersistence.persistenceWrite
+        op.oursprivacyPersistence.persistenceWrite = { _ in false }
+        op.captureMobileTime = {
+            MobileTimePoint(epochMs: start.epochMs + 5_000, monotonicMs: start.monotonicMs + 5_000)
+        }
+
+        op.setVisitorId(visitor)
+
+        let manual = op.currentEventContext(at: op.captureMobileTime())
+        XCTAssertEqual(manual.isManuallySetId, true)
+        XCTAssertEqual(manual.mobileSnapshot?.sid, sid)
+        let settled = try XCTUnwrap(op.mobileSession?.pendingFacts.first { $0.name == "$mobile_session_engagement" })
+        XCTAssertEqual(settled.isManuallySetId, false)
+        XCTAssertEqual(settled.properties["engagement_duration_ms"] as? Int64, 5_000)
+        let later = op.trackingQueue.sync {
+            [10_000, 20_000].flatMap { elapsed in
+                op.mobileSession?.checkpoint(at: MobileTimePoint(
+                    epochMs: start.epochMs + Int64(elapsed), monotonicMs: start.monotonicMs + Int64(elapsed))) ?? []
+            }
+        }
+        XCTAssertEqual(later.map(\.isManuallySetId), [true, true])
+        XCTAssertEqual(later.compactMap { $0.properties["engagement_duration_ms"] as? Int64 }, [5_000, 10_000])
+        XCTAssertTrue(later.allSatisfy { $0.sid == sid && $0.visitorId == visitor })
+        XCTAssertEqual(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events) as NSArray, original as NSArray)
+        op.setVisitorId(visitor)
+        XCTAssertEqual(op.mobileSession?.pendingFacts.count, 3)
+        op.oursprivacyPersistence.persistenceWrite = persist
+        op.track(event: "after-mode-change")
+        op.trackingQueue.sync {}
+        let queued = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(queued.compactMap { $0[OursPrivacyPersistence.localIdentityModeKey] as? Bool },
+                       [false, false, false, false, true, true, true])
+        XCTAssertEqual(queued.prefix(3).map { $0["distinct_id"] as? String },
+                       original.map { $0["distinct_id"] as? String })
+
+        _ = op.mobileSession?.background(at: MobileTimePoint(
+            epochMs: start.epochMs + 20_000, monotonicMs: start.monotonicMs + 20_000))
+        let restored = MobileSession(instanceName: op.name)
+        let reopened = restored.foreground(
+            automaticEnabled: true, visitorId: visitor, isManuallySetId: true,
+            at: MobileTimePoint(epochMs: start.epochMs + 1_820_000, monotonicMs: start.monotonicMs + 1_820_000))
+        let ended = try XCTUnwrap(reopened.first { $0.name == "$mobile_session_end" })
+        XCTAssertEqual(ended.sid, sid)
+        XCTAssertEqual(ended.isManuallySetId, true)
+    }
+
+    func testPendingCanonicalFactsKeepCapturedIdentityModeAfterFailedQueueWrite() async throws {
+        let token = "pending-identity-\(UUID().uuidString)"
+        defer {
+            OursPrivacyPersistence.deleteUserDefaultsData(instanceName: token)
+            UserDefaults(suiteName: OursPrivacyUserDefaultsKeys.suiteName)?
+                .removeObject(forKey: "oursprivacy-\(token)-OPMobileSession")
+        }
+        let op = OursPrivacy(token: token, trackAutomaticEvents: true)
+        op.mobileSession = MobileSession(instanceName: token)
+        op.mobileRuntimeEnabled = true
+        await op.initialize()
+        let persist = op.oursprivacyPersistence.persistenceWrite
+        op.oursprivacyPersistence.persistenceWrite = { _ in false }
+        op.mobileForeground(at: MobileTimePoint.capture())
+        op.trackingQueue.sync {}
+        XCTAssertEqual(op.mobileSession?.pendingFacts.count, 3)
+
+        op.setVisitorId(op.visitorId)
+        op.oursprivacyPersistence.persistenceWrite = persist
+        op.trackScreen("Schedule")
+        op.trackingQueue.sync {}
+        let queue = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertEqual(queue.filter { $0["event"] as? String == "$mobile_first_open" }.count, 1)
+        let success = ingestResult(#"{"success":true,"visitor_id":"visitor"}"#)
+        let request = ScriptedIngestRequest(responses: [success, success, success])
+        op.flushInstance.flushRequest = request
+        op.flushQueue(queue, type: .events)
+
+        let envelopes = request.sentEnvelopes
+        XCTAssertEqual(envelopes.compactMap { $0["is_manually_set_id"] as? Bool }, [false, true])
+        let first = try XCTUnwrap(envelopes.first?["data"] as? Queue)
+        XCTAssertTrue(first.contains { $0["event"] as? String == "$mobile_first_open" })
+        let last = try XCTUnwrap(envelopes.last?["data"] as? Queue)
+        XCTAssertEqual(last.last?["event"] as? String, "$mobile_screen_view")
+        XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+    }
+
+    func testOlderRowsUseCurrentIdentityModeAndStillSeparateVisitors() {
+        for manual in [false, true] {
+            let op = makeTask5Instance()
+            if manual { op.setVisitorId("current-visitor") }
+            for visitor in ["older-a", "older-b"] {
+                XCTAssertTrue(op.oursprivacyPersistence.saveEntity([
+                    "event": "older", "visitor_id": visitor, "distinct_id": UUID().uuidString,
+                    "eventProperties": NSNull(), "userProperties": NSNull(), "defaultProperties": [:]
+                ], type: .events))
+            }
+            let success = ingestResult(#"{"success":true,"visitor_id":"visitor"}"#)
+            let request = ScriptedIngestRequest(responses: [success, success])
+            op.flushInstance.flushRequest = request
+            op.flushQueue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events), type: .events)
+
+            XCTAssertEqual(request.sentEnvelopes.count, 2)
+            XCTAssertEqual(request.sentEnvelopes.compactMap { $0["is_manually_set_id"] as? Bool }, [manual, manual])
+            XCTAssertEqual(request.sentEnvelopes.compactMap { ($0["data"] as? Queue)?.first?["visitor_id"] as? String },
+                           ["older-a", "older-b"])
+            XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+        }
+    }
+
+    func testFlushSeparatesCapturedVisitorAndIdentityModeAcrossRestart() throws {
+        let token = "visitor-batches-\(UUID().uuidString)"
+        defer { OursPrivacyPersistence.deleteUserDefaultsData(instanceName: token) }
+        let original = OursPrivacy(token: token, trackAutomaticEvents: false)
+        let anonymousVisitor = original.visitorId
+        original.track(event: "anonymous")
+        original.trackingQueue.sync {}
+        original.setVisitorId(anonymousVisitor)
+        original.track(event: "explicit-same-visitor")
+        original.trackingQueue.sync {}
+        original.setVisitorId("linked-visitor")
+        original.identify(OursPrivacyUserProperties(externalId: "profile-1"))
+        original.track(event: "linked")
+        original.trackingQueue.sync {}
+
+        let restarted = OursPrivacy(token: token, trackAutomaticEvents: false)
+        let success = ingestResult(#"{"success":true,"visitor_id":"visitor"}"#)
+        let request = ScriptedIngestRequest(responses: [success, success, success])
+        restarted.flushInstance.flushRequest = request
+        restarted.flushQueue(restarted.oursprivacyPersistence.loadEntitiesInBatch(type: .events), type: .events)
+
+        XCTAssertTrue(restarted.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+        XCTAssertEqual(request.sentEnvelopes.count, 3)
+        XCTAssertEqual(request.sentEnvelopes.compactMap { $0["is_manually_set_id"] as? Bool }, [false, true, true])
+        let batches = request.sentEnvelopes.compactMap { $0["data"] as? Queue }
+        XCTAssertEqual(batches.map { $0.compactMap { $0["event"] as? String } },
+                       [["anonymous"], ["explicit-same-visitor"], ["$identify", "linked"]])
+        XCTAssertEqual(batches.map { $0.compactMap { $0["visitor_id"] as? String } },
+                       [[anonymousVisitor], [anonymousVisitor], ["linked-visitor", "linked-visitor"]])
+        for item in batches.flatMap({ $0 }) {
+            XCTAssertEqual(Set(item.keys), Set(["event", "visitor_id", "distinct_id",
+                                                "eventProperties", "userProperties", "defaultProperties"]))
+        }
+    }
+
     private func makeTask5Instance() -> OursPrivacy {
         OursPrivacy(token: "test-\(UUID().uuidString)", trackAutomaticEvents: false)
     }
@@ -233,6 +451,8 @@ extension OursPrivacyTests {
             #"{"success":true,"visitor_id":"visitor","accepted":0,"rejected":[{"index":0}]}"#,
             #"{"success":true,"visitor_id":"visitor","accepted":0,"rejected":[{"index":-1,"code":"bad"}]}"#,
             #"{"success":true,"visitor_id":"visitor","accepted":null,"rejected":null}"#,
+            #"{"success":true,"visitor_id":"visitor","accepted_count":1}"#,
+            #"{"success":true,"visitor_id":""}"#,
             #"not-json"#
         ]
         for body in invalid {
@@ -258,7 +478,7 @@ extension OursPrivacyTests {
         XCTAssertTrue(op.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
     }
 
-    func testIndexedModePersistsAcrossRestartAndRejectsLegacyFallback() {
+    func testIndexedModePersistsAcrossRestartAndAcceptsLegacySuccess() {
         let token = "indexed-\(UUID().uuidString)"
         let original = OursPrivacy(token: token, trackAutomaticEvents: false)
         original.track(event: "first")
@@ -275,7 +495,8 @@ extension OursPrivacyTests {
         restarted.flushInstance.flushRequest = ScriptedIngestRequest(
             responses: [ingestResult(#"{"success":true,"visitor_id":"visitor"}"#)])
         restarted.flushQueue(restarted.oursprivacyPersistence.loadEntitiesInBatch(type: .events), type: .events)
-        XCTAssertEqual(restarted.oursprivacyPersistence.loadEntitiesInBatch(type: .events).count, 1)
+        XCTAssertTrue(restarted.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+        XCTAssertTrue(restarted.oursprivacyPersistence.hasIndexedIngestMode)
         OursPrivacyPersistence.deleteUserDefaultsData(instanceName: token)
     }
 
@@ -310,8 +531,8 @@ extension OursPrivacyTests {
             restarted.flushInstance.flushRequest = ScriptedIngestRequest(
                 responses: [ingestResult(#"{"success":true,"visitor_id":"visitor"}"#)])
             restarted.flushQueue(pending, type: .events)
-            XCTAssertEqual(restarted.oursprivacyPersistence.loadEntitiesInBatch(type: .events).count,
-                           pending.count, privacyAction)
+            XCTAssertTrue(restarted.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty, privacyAction)
+            XCTAssertTrue(restarted.oursprivacyPersistence.hasIndexedIngestMode)
         }
     }
 

@@ -21,6 +21,42 @@ struct EventContext {
     let userConsentProperties: [String: Any]
     let attributionDefaultProperties: [String: Any]
     var mobileSnapshot: MobileSessionSnapshot?
+    var isManuallySetId: Bool?
+}
+
+enum MobileEventProperties {
+    static let commonKeys = ["mobile_contract_version", "mobile_occurred_at", "app_version", "app_build"]
+    static let maximumCount = 200
+    static let maximumSerializedLength = 1_048_576
+
+    static func adding(_ metadata: InternalProperties, to properties: InternalProperties) -> InternalProperties {
+        var properties = properties
+        for key in commonKeys + ["mobile_session_started_at", "mobile_platform"] {
+            properties.removeValue(forKey: key)
+        }
+        var enriched = properties
+        enriched += metadata
+        guard fits(enriched) else {
+            OursPrivacyLogger.warn(message: "Mobile metadata omitted because event properties exceed capacity")
+            return properties
+        }
+        return enriched
+    }
+
+    static func omittingMetadataIfNeeded(_ properties: InternalProperties) -> InternalProperties {
+        guard !fits(properties) else { return properties }
+        var ordinary = properties
+        for key in commonKeys { ordinary.removeValue(forKey: key) }
+        guard fits(ordinary) else { return properties }
+        OursPrivacyLogger.warn(message: "Mobile metadata omitted because event properties exceed capacity")
+        return ordinary
+    }
+
+    private static func fits(_ properties: InternalProperties) -> Bool {
+        guard properties.count <= maximumCount,
+              let encoded = JSONHandler.encodeAPIData(properties) else { return false }
+        return encoded.utf16.count < maximumSerializedLength
+    }
 }
 
 class Track {
@@ -82,9 +118,10 @@ class Track {
         defaultProperties += context.attributionDefaultProperties
         if let snapshot = context.mobileSnapshot {
             defaultProperties += snapshot.defaultProperties
+            mergedEventProperties = MobileEventProperties.adding(snapshot.eventProperties, to: mergedEventProperties)
         }
 
-        let item: InternalProperties = [
+        var item: InternalProperties = [
             "event": name,
             "visitor_id": context.visitorId,
             "distinct_id": distinctId,
@@ -92,13 +129,10 @@ class Track {
             "userProperties": mergedUserProperties ?? NSNull(),
             "defaultProperties": defaultProperties
         ]
+        item[OursPrivacyPersistence.localIdentityModeKey] = context.isManuallySetId
         return item
     }
 
-    /// Builds the inner `data[]` element for an `identify()` call.
-    /// `event: "$identify"`, `eventProperties: null`, `userProperties`
-    /// carries the typed visitor profile. Callers set `external_id` on the
-    /// struct themselves when they want to stitch to an external system.
     func composeIdentifyEvent(userProperties: Properties?,
                               context: EventContext) -> InternalProperties {
         assertPropertyTypes(userProperties)
@@ -116,14 +150,16 @@ class Track {
             defaultProperties += snapshot.defaultProperties
         }
 
-        return [
+        var item: InternalProperties = [
             "event": "$identify",
             "visitor_id": context.visitorId,
             "distinct_id": UUID().uuidString,
-            "eventProperties": NSNull(),
+            "eventProperties": context.mobileSnapshot?.eventProperties ?? NSNull(),
             "userProperties": merged ?? NSNull(),
             "defaultProperties": defaultProperties
         ]
+        item[OursPrivacyPersistence.localIdentityModeKey] = context.isManuallySetId
+        return item
     }
 
     func composeMobileFact(_ fact: MobileFact) -> InternalProperties {
@@ -131,7 +167,7 @@ class Track {
                            "os_version", "screen_width", "screen_height", "version"])
         var defaults = AutomaticProperties.defaultProperties.filter { allowed.contains($0.key) }
         defaults += fact.defaultProperties
-        return [
+        var item: InternalProperties = [
             "event": fact.name,
             "visitor_id": fact.visitorId,
             "distinct_id": fact.distinctId,
@@ -139,6 +175,8 @@ class Track {
             "userProperties": NSNull(),
             "defaultProperties": defaults
         ]
+        item[OursPrivacyPersistence.localIdentityModeKey] = fact.isManuallySetId
+        return item
     }
 
     /// Merges per-call user properties with the store-level default custom

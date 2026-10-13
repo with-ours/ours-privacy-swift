@@ -573,7 +573,7 @@ final class OursPrivacyTests: XCTestCase {
         XCTAssertTrue(op.isManuallySetId)
         XCTAssertEqual(defaults["utm_source"] as? String, "campaign")
         XCTAssertEqual(defaults["fbclid"] as? String, "click-from-ad")
-        XCTAssertTrue(opened["eventProperties"] is NSNull)
+        XCTAssertEqual((opened["eventProperties"] as? [String: Any])?["mobile_contract_version"] as? Int, 1)
         XCTAssertFalse(String(describing: opened).contains("https://example.test"))
         XCTAssertFalse(String(describing: opened).contains("patient_email"))
         XCTAssertFalse(String(describing: opened).contains("secret"))
@@ -794,23 +794,24 @@ final class OursPrivacyTests: XCTestCase {
             XCTAssertEqual(item["visitor_id"] as? String, "stitched-ios")
             XCTAssertNil(item["time"])
             let defaults = item["defaultProperties"] as? [String: Any]
-            XCTAssertEqual(defaults?["mobile_platform"] as? String, "ios")
-            XCTAssertEqual(defaults?["mobile_contract_version"] as? Int, 1)
-            XCTAssertNotNil((defaults?["mobile_occurred_at"] as? String)?
-                .range(of: timestampPattern, options: .regularExpression))
-            XCTAssertNotNil((defaults?["mobile_session_started_at"] as? String)?
+            let properties = item["eventProperties"] as? [String: Any]
+            XCTAssertNil(defaults?["mobile_platform"])
+            XCTAssertNil(defaults?["mobile_session_started_at"])
+            XCTAssertNotNil((defaults?["sid"] as? String)?.range(of: "^[0-9]{13}$", options: .regularExpression))
+            XCTAssertEqual(properties?["mobile_contract_version"] as? Int, 1)
+            XCTAssertNotNil((properties?["mobile_occurred_at"] as? String)?
                 .range(of: timestampPattern, options: .regularExpression))
             XCTAssertEqual(defaults?["version"] as? String, "swift@3.1.0")
             if let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
-                XCTAssertEqual(defaults?["app_version"] as? String, appVersion)
+                XCTAssertEqual(properties?["app_version"] as? String, appVersion)
             }
             if let appBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String {
-                XCTAssertEqual(defaults?["app_build"] as? String, appBuild)
+                XCTAssertEqual(properties?["app_build"] as? String, appBuild)
             }
         }
         for item in canonical {
             XCTAssertTrue(item["userProperties"] is NSNull)
-            XCTAssertTrue(item["eventProperties"] is NSNull)
+            XCTAssertEqual((item["eventProperties"] as? [String: Any])?["mobile_contract_version"] as? Int, 1)
             XCTAssertNil((item["defaultProperties"] as? [String: Any])?["utm_source"])
         }
         XCTAssertEqual((booked?["eventProperties"] as? [String: Any])?["caller_field"] as? String, "event")
@@ -859,7 +860,7 @@ final class OursPrivacyTests: XCTestCase {
         XCTAssertNotNil((items[0]["defaultProperties"] as? [String: Any])?["sid"] as? String)
         XCTAssertEqual((items[1]["defaultProperties"] as? [String: Any])?["sid"] as? String,
                        (items[0]["defaultProperties"] as? [String: Any])?["sid"] as? String)
-        XCTAssertEqual((items[1]["defaultProperties"] as? [String: Any])?["mobile_platform"] as? String, "ios")
+        XCTAssertEqual((items[1]["eventProperties"] as? [String: Any])?["mobile_contract_version"] as? Int, 1)
     }
 
     func testTrackScreenQueuesViewOnceAndAttributesPreviousEngagement() async {
@@ -1077,7 +1078,7 @@ final class OursPrivacyTests: XCTestCase {
         XCTAssertFalse(session.hasAcceptedFirstOpen)
         let sent = persistence.loadEntitiesInBatch(type: .events)
         XCTAssertEqual(sent.first?["visitor_id"] as? String, "original-visitor")
-        XCTAssertEqual((sent.first?["defaultProperties"] as? [String: Any])?["app_version"] as? String, "2.0")
+        XCTAssertEqual((sent.first?["eventProperties"] as? [String: Any])?["app_version"] as? String, "2.0")
         persistence.removeEntitiesInBatch(type: .events,
                                           ids: sent.compactMap { $0["id"] as? Int32 })
 
@@ -1470,8 +1471,9 @@ final class OursPrivacyTests: XCTestCase {
             .first { $0["event"] as? String == "appointment_booked" }
         let defaults = booking?["defaultProperties"] as? [String: Any]
         XCTAssertNotNil(defaults?["sid"] as? String)
-        XCTAssertEqual(defaults?["mobile_session_started_at"] as? String,
-                       defaults?["mobile_occurred_at"] as? String)
+        XCTAssertEqual(defaults?["sid"] as? String, "1791245100000")
+        XCTAssertEqual((booking?["eventProperties"] as? [String: Any])?["mobile_occurred_at"] as? String,
+                       "2026-10-06T00:05:00.000Z")
     }
 
     func testWipeLegacySQLiteFileIfPresent() {

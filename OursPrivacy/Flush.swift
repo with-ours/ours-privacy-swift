@@ -110,20 +110,26 @@ class Flush: AppLifecycle, @unchecked Sendable {
 
         var mutableQueue = queue
         while !mutableQueue.isEmpty {
-            let batchSize = min(mutableQueue.count, flushBatchSize)
-            let batch = Array(mutableQueue.prefix(batchSize))
+            guard let visitorId = mutableQueue[0]["visitor_id"] as? String, !visitorId.isEmpty else { break }
+            let manualId = mutableQueue[0][OursPrivacyPersistence.localIdentityModeKey] as? Bool ?? context.isManuallySetId
+            let batch = Array(mutableQueue.prefix(max(1, flushBatchSize)).prefix { row in
+                row["visitor_id"] as? String == visitorId &&
+                    (row[OursPrivacyPersistence.localIdentityModeKey] as? Bool ?? context.isManuallySetId) == manualId
+            })
+            let batchSize = batch.count
             let rowIDs = batch.compactMap { $0[OursPrivacyPersistence.localRowIDKey] as? String }
 
             let items = batch.map { row -> InternalProperties in
                 var copy = row
                 copy.removeValue(forKey: "id")
                 copy.removeValue(forKey: OursPrivacyPersistence.localRowIDKey)
+                copy.removeValue(forKey: OursPrivacyPersistence.localIdentityModeKey)
                 return copy
             }
 
             let envelope: InternalProperties = [
                 "token": context.token,
-                "is_manually_set_id": context.isManuallySetId,
+                "is_manually_set_id": manualId,
                 "data": items
             ]
 
@@ -166,8 +172,7 @@ class Flush: AppLifecycle, @unchecked Sendable {
                     delegate?.reportIngestRejection(distinctId: distinctId, code: code)
                 }
             } else {
-                guard delegate?.hasIndexedIngestMode() == false,
-                      delegate?.acknowledgeFlush(type: type, rowIDs: rowIDs) == true else { break }
+                guard delegate?.acknowledgeFlush(type: type, rowIDs: rowIDs) == true else { break }
             }
             mutableQueue.removeFirst(batchSize)
         }

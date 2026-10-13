@@ -493,12 +493,14 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
 
     func currentEventContext(at point: MobileTimePoint = MobileTimePoint.capture()) -> EventContext {
         var visitorIdSnapshot = ""
+        var manualIdSnapshot = false
         var defaultEventSnapshot: InternalProperties = [:]
         var customSnapshot: InternalProperties = [:]
         var consentSnapshot: InternalProperties = [:]
         var attributionSnapshot: InternalProperties = [:]
         readWriteLock.read {
             visitorIdSnapshot = _visitorId
+            manualIdSnapshot = _isManuallySetId
             defaultEventSnapshot = defaultEventProperties
             customSnapshot = userCustomProperties
             consentSnapshot = userConsentProperties
@@ -507,14 +509,16 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
         let snapshot = mobileRuntimeEnabled
             ? mobileSession?.snapshot(visitorId: visitorIdSnapshot,
                                       appVersion: AutomaticProperties.appVersion,
-                                      appBuild: AutomaticProperties.appBuild, at: point)
+                                      appBuild: AutomaticProperties.appBuild,
+                                      isManuallySetId: manualIdSnapshot, at: point)
             : nil
         return EventContext(visitorId: visitorIdSnapshot,
                             defaultEventProperties: defaultEventSnapshot,
                             userCustomProperties: customSnapshot,
                             userConsentProperties: consentSnapshot,
                             attributionDefaultProperties: attributionSnapshot,
-                            mobileSnapshot: snapshot)
+                            mobileSnapshot: snapshot,
+                            isManuallySetId: manualIdSnapshot)
     }
 
     private func queuePendingMobileFacts() {
@@ -639,7 +643,8 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
         _ = mobileSession.foreground(automaticEnabled: trackAutomaticEventsEnabled,
                                      visitorId: visitorId,
                                      appVersion: AutomaticProperties.appVersion,
-                                     appBuild: AutomaticProperties.appBuild, at: point)
+                                     appBuild: AutomaticProperties.appBuild,
+                                     isManuallySetId: isManuallySetId, at: point)
         queuePendingMobileFacts()
         if trackAutomaticEventsEnabled {
             startMobileCheckpointTimer()
@@ -843,11 +848,15 @@ extension OursPrivacy {
             AutomaticProperties.primeUIPropertiesIfOnMain()
         #endif
         let update = {
-            if self.visitorId != visitorId, self.mobileRuntimeEnabled,
-               let mobileSession = self.mobileSession {
-                _ = mobileSession.rotate(to: visitorId,
-                                         appVersion: AutomaticProperties.appVersion,
-                                         appBuild: AutomaticProperties.appBuild, at: point)
+            if self.mobileRuntimeEnabled, let mobileSession = self.mobileSession {
+                if self.visitorId != visitorId {
+                    _ = mobileSession.rotate(to: visitorId,
+                                             appVersion: AutomaticProperties.appVersion,
+                                             appBuild: AutomaticProperties.appBuild,
+                                             isManuallySetId: true, at: point)
+                } else if !self.isManuallySetId {
+                    _ = mobileSession.setIdentityMode(true, at: point)
+                }
                 self.queuePendingMobileFacts()
             }
             self.readWriteLock.write {
@@ -925,7 +934,8 @@ extension OursPrivacy {
             if self.mobileRuntimeEnabled, let mobileSession = self.mobileSession {
                 _ = mobileSession.rotate(to: nextVisitorId,
                                          appVersion: AutomaticProperties.appVersion,
-                                         appBuild: AutomaticProperties.appBuild, at: point)
+                                         appBuild: AutomaticProperties.appBuild,
+                                         isManuallySetId: false, at: point)
                 mobileSession.discardPendingFacts()
             }
             _ = self.oursprivacyPersistence.clearEntitiesForPrivacy()
@@ -1148,7 +1158,8 @@ extension OursPrivacy {
             self.queuePendingMobileFacts()
             _ = mobileSession.screen(name, visitorId: self.visitorId,
                                      appVersion: AutomaticProperties.appVersion,
-                                     appBuild: AutomaticProperties.appBuild, at: point)
+                                     appBuild: AutomaticProperties.appBuild,
+                                     isManuallySetId: self.isManuallySetId, at: point)
             self.queuePendingMobileFacts()
         }
     }

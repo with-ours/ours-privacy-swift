@@ -39,7 +39,7 @@ final class OursPrivacyiOSDemoUITests: XCTestCase {
         XCTAssertEqual(firstOpen["visitor_id"] as? String, visitorId)
         XCTAssertEqual(sessionStart["visitor_id"] as? String, visitorId)
         let sid = try XCTUnwrap((sessionStart["defaultProperties"] as? [String: Any])?["sid"] as? String)
-        XCTAssertFalse(sid.isEmpty)
+        XCTAssertNotNil(sid.range(of: "^[0-9]{13}$", options: .regularExpression))
         XCTAssertEqual((firstOpen["defaultProperties"] as? [String: Any])?["sid"] as? String, sid)
 
         app.buttons["openSchedule"].tap()
@@ -170,21 +170,28 @@ final class OursPrivacyiOSDemoUITests: XCTestCase {
         XCTAssertLessThan(warmOpen.offset, beforeOptOut)
         for event in [firstOpen, sessionStart, screen, booking, engagement] {
             let defaults = try XCTUnwrap(event["defaultProperties"] as? [String: Any])
-            XCTAssertEqual(defaults["mobile_platform"] as? String, "ios")
-            XCTAssertEqual(defaults["mobile_contract_version"] as? Int, 1)
-            XCTAssertEqual(defaults["app_version"] as? String, "1.0")
-            XCTAssertEqual(defaults["app_build"] as? String, "1")
-            let startedAt = try XCTUnwrap(defaults["mobile_session_started_at"] as? String)
-            let occurredAt = try XCTUnwrap(defaults["mobile_occurred_at"] as? String)
-            let startedDate = try XCTUnwrap(parseUTCMillisecondTimestamp(startedAt), startedAt)
+            let properties = try XCTUnwrap(event["eventProperties"] as? [String: Any])
+            XCTAssertEqual(properties["mobile_contract_version"] as? Int, 1)
+            XCTAssertEqual(properties["app_version"] as? String, "1.0")
+            XCTAssertEqual(properties["app_build"] as? String, "1")
+            for key in ["mobile_platform", "mobile_session_started_at", "mobile_contract_version",
+                        "mobile_occurred_at", "app_version", "app_build"] {
+                XCTAssertNil(defaults[key], key)
+            }
+            XCTAssertNil(properties["mobile_platform"])
+            XCTAssertNil(properties["mobile_session_started_at"])
+            let startedAt = try XCTUnwrap(defaults["sid"] as? String)
+            XCTAssertNotNil(startedAt.range(of: "^[0-9]{13}$", options: .regularExpression))
+            let startedDate = Date(timeIntervalSince1970: try XCTUnwrap(Double(startedAt)) / 1_000)
+            let occurredAt = try XCTUnwrap(properties["mobile_occurred_at"] as? String)
             let occurredDate = try XCTUnwrap(parseUTCMillisecondTimestamp(occurredAt), occurredAt)
             XCTAssertGreaterThanOrEqual(occurredDate, startedDate)
-            XCTAssertEqual(startedAt, (sessionStart["defaultProperties"] as? [String: Any])?["mobile_session_started_at"] as? String)
+            XCTAssertEqual(startedAt, sid)
             XCTAssertNil(event["time"])
         }
         func occurrence(_ event: [String: Any]) throws -> Date {
-            let defaults = try XCTUnwrap(event["defaultProperties"] as? [String: Any])
-            let timestamp = try XCTUnwrap(defaults["mobile_occurred_at"] as? String)
+            let properties = try XCTUnwrap(event["eventProperties"] as? [String: Any])
+            let timestamp = try XCTUnwrap(properties["mobile_occurred_at"] as? String)
             return try XCTUnwrap(parseUTCMillisecondTimestamp(timestamp), timestamp)
         }
         XCTAssertLessThanOrEqual(try occurrence(firstOpen), try occurrence(sessionStart))
@@ -208,11 +215,15 @@ final class OursPrivacyiOSDemoUITests: XCTestCase {
         for envelope in try envelopes(recorderURL: recorderURL)
             where envelope["token"] as? String == token {
             XCTAssertNotNil(envelope["is_manually_set_id"] as? Bool)
-            for event in envelope["data"] as? [[String: Any]] ?? [] {
+            let batch = envelope["data"] as? [[String: Any]] ?? []
+            XCTAssertEqual(Set(batch.compactMap { $0["visitor_id"] as? String }).count, 1)
+            for event in batch {
                 XCTAssertNotNil(event["event"] as? String)
                 XCTAssertNotNil(event["visitor_id"] as? String)
                 XCTAssertNotNil(event["distinct_id"] as? String)
                 XCTAssertNil(event["time"])
+                XCTAssertNil(event["op_local_row_id"])
+                XCTAssertNil(event["op_local_identity_mode"])
                 let defaults = try XCTUnwrap(event["defaultProperties"] as? [String: Any])
                 XCTAssertEqual(defaults["version"] as? String, "swift@3.1.0")
                 XCTAssertEqual(defaults["device_vendor"] as? String, "Apple")

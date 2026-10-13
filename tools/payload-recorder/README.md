@@ -38,7 +38,7 @@ Once you've captured a payload, diff it against a fixture:
 python3 tools/payload-recorder/assert_payload.py captures/20260512T130045-0001_ingest.json fixtures/track_minimal.json
 ```
 
-Exits 0 on match, 1 on mismatch. Volatile keys (`time`, `$time`, `timestamp`, `session_id`) are skipped.
+Exits 0 on match, 1 on mismatch. Identifiers and device values may vary. Mobile captures require a decimal millisecond `defaultProperties.sid` and UTC millisecond `eventProperties.mobile_occurred_at`; their values may vary while their presence is checked. Mobile metadata belongs in event properties.
 
 ## Fixtures
 

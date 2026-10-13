@@ -53,6 +53,7 @@ struct OursPrivacyUserDefaultsKeys {
 class OursPrivacyPersistence {
 
     static let localRowIDKey = "op_local_row_id"
+    static let localIdentityModeKey = "op_local_identity_mode"
     let instanceName: String
 
     private let queueLock = ReadWriteLock(label: "com.oursprivacy.persistence.queue")
@@ -271,7 +272,7 @@ class OursPrivacyPersistence {
 
         var seenIDs = Set<String>()
         let hydrated = array.map { row -> InternalProperties in
-            var item = row
+            var item = migrateMobilePayload(row)
             if let id = item[Self.localRowIDKey] as? String, !id.isEmpty, seenIDs.insert(id).inserted {
                 return item
             }
@@ -289,6 +290,49 @@ class OursPrivacyPersistence {
             }.max() ?? 0
             nextId = maxId &+ 1
         }
+        if hydrated as NSArray != array as NSArray {
+            _ = persistQueueToDefaults(hydrated, firstOpenAccepted: firstOpenQueueEvidence)
+        }
+    }
+
+    private func migrateMobilePayload(_ row: InternalProperties) -> InternalProperties {
+        guard var defaults = row["defaultProperties"] as? InternalProperties else { return row }
+        var item = row
+        var properties = row["eventProperties"] as? InternalProperties ?? [:]
+        if defaults["mobile_platform"] as? String != "ios" {
+            guard defaults["os_name"] as? String == "iOS",
+                  properties["mobile_contract_version"] as? Int == 1 else { return row }
+            item["eventProperties"] = MobileEventProperties.omittingMetadataIfNeeded(properties)
+            return item
+        }
+        if let sid = defaults["sid"] as? String,
+           sid.range(of: "^[0-9]{13}$", options: .regularExpression) == nil {
+            defaults.removeValue(forKey: "sid")
+            if let timestamp = defaults["mobile_session_started_at"] as? String {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                formatter.timeZone = TimeZone(secondsFromGMT: 0)
+                if let date = formatter.date(from: timestamp),
+                   formatter.string(from: date) == timestamp {
+                    let milliseconds = (date.timeIntervalSince1970 * 1_000).rounded()
+                    if milliseconds >= 1_000_000_000_000, milliseconds <= 9_999_999_999_999 {
+                        defaults["sid"] = String(Int64(milliseconds))
+                    }
+                }
+            }
+        }
+        for key in ["mobile_contract_version", "mobile_occurred_at", "app_version", "app_build"] {
+            properties.removeValue(forKey: key)
+            if let value = defaults.removeValue(forKey: key) { properties[key] = value }
+        }
+        for key in ["mobile_session_started_at", "mobile_platform"] {
+            defaults.removeValue(forKey: key)
+            properties.removeValue(forKey: key)
+        }
+        item["defaultProperties"] = defaults
+        let normalized = MobileEventProperties.omittingMetadataIfNeeded(properties)
+        item["eventProperties"] = normalized.isEmpty ? NSNull() : normalized
+        return item
     }
 
     private func persistQueueToDefaults(_ events: [InternalProperties], firstOpenAccepted: Bool) -> Bool {

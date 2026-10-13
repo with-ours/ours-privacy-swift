@@ -37,7 +37,7 @@ final class MobileSessionTests: XCTestCase {
         XCTAssertEqual(facts[0].appBuild, "45")
         XCTAssertEqual(facts[0].occurredAtISO, "2026-10-05T10:00:00.000Z")
         XCTAssertEqual(facts[0].startedAtISO, "2026-10-05T10:00:00.000Z")
-        XCTAssertEqual(facts[0].defaultProperties["mobile_contract_version"] as? Int, 1)
+        XCTAssertEqual(facts[0].properties["mobile_contract_version"] as? Int, 1)
         XCTAssertTrue(session.foreground(automaticEnabled: true, visitorId: "visitor-a", at: point(0)).isEmpty)
     }
 
@@ -301,8 +301,8 @@ final class MobileSessionTests: XCTestCase {
         XCTAssertEqual(snapshot.startedAtISO, "2026-10-05T10:00:00.000Z")
         XCTAssertEqual(snapshot.occurredAtISO, "2026-10-05T10:00:00.000Z")
         XCTAssertTrue(session.pendingFacts.isEmpty)
-        XCTAssertEqual(snapshot.defaultProperties["mobile_platform"] as? String, "ios")
-        XCTAssertEqual(snapshot.defaultProperties["mobile_contract_version"] as? Int, 1)
+        XCTAssertNil(snapshot.defaultProperties["mobile_platform"])
+        XCTAssertEqual(snapshot.eventProperties["mobile_contract_version"] as? Int, 1)
         XCTAssertEqual(snapshot.defaultProperties["sid"] as? String, snapshot.sid)
     }
 
@@ -872,7 +872,7 @@ extension OursPrivacyTests {
         XCTAssertTrue(events.allSatisfy { $0["visitor_id"] as? String == op.visitorId })
         let blue = events.first { $0["event"] as? String == "Blue" }
         XCTAssertEqual((blue?["eventProperties"] as? [String: Any])?["shade"] as? String, "cerulean")
-        XCTAssertEqual((blue?["defaultProperties"] as? [String: Any])?["mobile_occurred_at"] as? String,
+        XCTAssertEqual((blue?["eventProperties"] as? [String: Any])?["mobile_occurred_at"] as? String,
                        "2026-10-05T10:00:01.000Z")
     }
 
@@ -969,7 +969,7 @@ extension OursPrivacyTests {
         XCTAssertEqual(events.compactMap { $0["event"] as? String },
                        ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start", "$opt_in", "Blue"])
         XCTAssertEqual((events.last?["eventProperties"] as? [String: Any])?["shade"] as? String, "cerulean")
-        XCTAssertEqual((events.last?["defaultProperties"] as? [String: Any])?["mobile_occurred_at"] as? String,
+        XCTAssertEqual((events.last?["eventProperties"] as? [String: Any])?["mobile_occurred_at"] as? String,
                        "2026-10-05T10:00:01.000Z")
     }
 
@@ -1271,8 +1271,8 @@ extension OursPrivacyTests {
         XCTAssertFalse(op.oursprivacyPersistence.hasPendingPrivacyClear)
         XCTAssertEqual(events.compactMap { $0["event"] as? String },
                        ["$mobile_first_open", "$mobile_app_open", "$mobile_session_start"])
-        XCTAssertEqual((events.first?["defaultProperties"] as? [String: Any])?["mobile_occurred_at"] as? String,
-                       (events.last?["defaultProperties"] as? [String: Any])?["mobile_occurred_at"] as? String)
+        XCTAssertEqual((events.first?["eventProperties"] as? [String: Any])?["mobile_occurred_at"] as? String,
+                       (events.last?["eventProperties"] as? [String: Any])?["mobile_occurred_at"] as? String)
     }
 
     func assertResumedTimerCheckpointsCumulativeEngagement(recreate: Bool, inactiveOnly: Bool = false) async {

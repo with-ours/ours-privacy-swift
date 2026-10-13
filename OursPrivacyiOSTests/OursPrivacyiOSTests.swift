@@ -35,6 +35,87 @@ private final class LockedTestMobileTime: @unchecked Sendable {
 }
 
 struct OursPrivacyiOSTests {
+    @Test @MainActor func callerBagNearSerializedSizeLimitOmitsMetadata() async throws {
+        let op = OursPrivacy(token: "ios-size-\(UUID().uuidString)", trackAutomaticEvents: false)
+        op.flushInstance.delegate = nil
+        op.flushInstance._flushInterval = 0
+        await op.initialize()
+        let ordinary = ["field": String(repeating: "a", count: 1_048_563)]
+        op.track(event: "large-booking", properties: ordinary.mapValues { $0 as OursPrivacyType })
+        op.track(event: "following-booking")
+        op.trackingQueue.sync {}
+
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        #expect(items.count == 2)
+        let properties = try #require(items.first?["eventProperties"] as? InternalProperties)
+        let preserved = properties as NSDictionary == ordinary as NSDictionary
+        #expect(preserved)
+        #expect(try #require(JSONHandler.encodeAPIData(properties)).utf16.count == 1_048_575)
+        #expect((items.first?["defaultProperties"] as? InternalProperties)?["sid"] is String)
+        #expect((items.last?["eventProperties"] as? InternalProperties)?["mobile_contract_version"] as? Int == 1)
+    }
+
+    @Test @MainActor func sameVisitorModeChangePreservesSessionAndSplitsEngagement() async throws {
+        let op = OursPrivacy(token: "ios-mode-\(UUID().uuidString)", trackAutomaticEvents: true)
+        op.flushInstance.delegate = nil
+        op.flushInstance._flushInterval = 0
+        let clock = LockedTestMobileTime(MobileTimePoint.capture())
+        op.captureMobileTime = { clock.capture() }
+        op.mobileQueueNowMs = { clock.capture().epochMs }
+        op.mobileCheckpointIntervalMs = 60_000
+        defer {
+            op.optOutTracking()
+            op.trackingQueue.sync {}
+        }
+        await op.initialize()
+        op.mobileForeground(at: clock.capture())
+        op.trackingQueue.sync {}
+        let visitor = try #require(op.getVisitorId())
+        let initial = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let sid = try #require((initial.first?["defaultProperties"] as? InternalProperties)?["sid"] as? String)
+        clock.advance(by: 5_000)
+
+        op.setVisitorId(visitor)
+        clock.advance(by: 5_000)
+        _ = op.mobileSession?.checkpoint(at: clock.capture())
+        op.track(event: "after-mode-change")
+        op.trackingQueue.sync {}
+        clock.advance(by: 10_000)
+        _ = op.mobileSession?.checkpoint(at: clock.capture())
+        op.track(event: "later")
+        op.trackingQueue.sync {}
+
+        let queued = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        let engagement = queued.filter { $0["event"] as? String == "$mobile_session_engagement" }
+        #expect(engagement.compactMap { ($0["eventProperties"] as? InternalProperties)?["engagement_duration_ms"] as? Int64 }
+                == [5_000, 5_000, 10_000])
+        #expect(engagement.compactMap { $0[OursPrivacyPersistence.localIdentityModeKey] as? Bool } == [false, true, true])
+        #expect(queued.allSatisfy { ($0["defaultProperties"] as? InternalProperties)?["sid"] as? String == sid })
+        #expect(queued.last?[OursPrivacyPersistence.localIdentityModeKey] as? Bool == true)
+    }
+
+    @Test @MainActor func fullCallerBagOmitsMetadataWhileIdentifyAndFollowingEventKeepIt() async throws {
+        let op = OursPrivacy(token: "ios-capacity-\(UUID().uuidString)", trackAutomaticEvents: false)
+        op.flushInstance.delegate = nil
+        op.flushInstance._flushInterval = 0
+        await op.initialize()
+        let ordinary = Dictionary(uniqueKeysWithValues: (0 ..< 200).map { ("field_\($0)", "value_\($0)") })
+
+        op.track(event: "large-booking", properties: ordinary.mapValues { $0 as OursPrivacyType })
+        op.identify(OursPrivacyUserProperties(externalId: "profile"))
+        op.track(event: "following-booking")
+        op.trackingQueue.sync {}
+
+        let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        #expect(items.count == 3)
+        let first = try #require(items.first)
+        #expect(first["eventProperties"] as? NSDictionary == ordinary as NSDictionary)
+        #expect((first["defaultProperties"] as? InternalProperties)?["os_name"] as? String == "iOS")
+        #expect((first["defaultProperties"] as? InternalProperties)?["sid"] is String)
+        for item in items.dropFirst() {
+            #expect((item["eventProperties"] as? InternalProperties)?["mobile_contract_version"] as? Int == 1)
+        }
+    }
 
     @Test func maxBatchSizeIsClampedAt50() async throws {
         #expect(APIConstants.maxBatchSize == 50)
@@ -94,7 +175,9 @@ struct OursPrivacyiOSTests {
         #expect(openDefaults?["sid"] as? String == bookedDefaults?["sid"] as? String)
         #expect(mobile.allSatisfy { $0["visitor_id"] as? String == "linked-ios" })
         #expect(booked?["visitor_id"] as? String == "linked-ios")
-        #expect(openDefaults?["mobile_platform"] as? String == "ios")
+        #expect(openDefaults?["mobile_platform"] == nil)
+        #expect((mobile.first?["eventProperties"] as? [String: Any])?["mobile_contract_version"] as? Int == 1)
+        #expect((openDefaults?["sid"] as? String)?.range(of: "^[0-9]{13}$", options: .regularExpression) != nil)
         #expect(openDefaults?["os_name"] as? String == "iOS")
         #expect(openDefaults?["utm_source"] == nil)
         #expect((mobile.first?["eventProperties"] as? [String: Any])?["caller_field"] == nil)
@@ -113,7 +196,7 @@ struct OursPrivacyiOSTests {
         let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
         #expect(items.map { $0["event"] as? String } == ["$mobile_screen_view"])
         #expect((items[0]["eventProperties"] as? [String: Any])?["screen_name"] as? String == "Schedule")
-        #expect((items[0]["defaultProperties"] as? [String: Any])?["mobile_platform"] as? String == "ios")
+        #expect((items[0]["eventProperties"] as? [String: Any])?["mobile_contract_version"] as? Int == 1)
         #expect((items[0]["defaultProperties"] as? [String: Any])?["sid"] is String)
 
         op.optOutTracking()
