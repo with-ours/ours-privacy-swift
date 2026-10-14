@@ -65,7 +65,7 @@ jobs:
               exit 1
             fi
 
-            python3 tools/check-version.py "$VERSION"
+            python3 .github/scripts/check-version.py "$VERSION"
           fi
 
           echo "✅ PR title format is valid"

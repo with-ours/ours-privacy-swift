@@ -31,10 +31,6 @@ profile
 
 Carthage/Build/
 
-# Payload recorder
-tools/payload-recorder/captures/
-
 # Claude Code configuration
-CLAUDE.md
 .claude
 .claude/

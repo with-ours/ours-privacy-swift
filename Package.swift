@@ -29,11 +29,6 @@ let package = Package(
             name: "OursPrivacyKitTests",
             dependencies: ["OursPrivacyKit"],
             path: "Tests/OursPrivacyTests"
-        ),
-        .executableTarget(
-            name: "RecorderProbe",
-            dependencies: ["OursPrivacyKit"],
-            path: "tools/recorder-probe"
         )
     ],
     swiftLanguageModes: [.v5]

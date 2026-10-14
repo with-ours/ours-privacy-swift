@@ -20,11 +20,12 @@ concurrency:
 jobs:
   ci:
     if: >
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      github.event.repository.private == false &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'pull_request' &&
        github.event.pull_request.merged == true &&
        (startsWith(github.event.pull_request.title, 'release:') ||
-        startsWith(github.event.pull_request.title, 'release(')))
+        startsWith(github.event.pull_request.title, 'release('))))
     uses: $/.github/workflows/ci.yml
     permissions:
       contents: read
@@ -64,7 +65,7 @@ jobs:
             exit 1
           fi
 
-          python3 tools/check-version.py "$VERSION"
+          python3 .github/scripts/check-version.py "$VERSION"
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
