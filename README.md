@@ -590,13 +590,7 @@ The SDK sends a JSON body to `POST /ingest` on the configured `serverURL`. Under
 
 ## Local Demo Tests
 
-Install Xcode 26.5 with the iOS 26.5 simulator runtime. From the repository root, run:
-
-```sh
-./tools/payload-recorder/run-ios-e2e.sh
-```
-
-The command starts the included recorder, runs the UIKit demo on an iPhone 17 Pro simulator, and checks the payloads sent by each demo action. It needs no Ours Privacy account or external service. Each run saves captures in its own directory under `tools/payload-recorder/captures/`; the command prints the path. CI uses this same command.
+Run the package unit tests with `swift test`. The SDK and demo Xcode schemes also include simulator test targets.
 
 The demo Xcode project resolves the SDK from this checkout. Set `OURSPRIVACY_TOKEN` and `OURSPRIVACY_SERVER_URL` in the demo scheme to try it manually against your own source.
 

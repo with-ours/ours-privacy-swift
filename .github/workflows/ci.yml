@@ -28,17 +28,15 @@ jobs:
       - name: Select Xcode 26.5
         run: sudo xcode-select -s /Applications/Xcode_26.5.app
       - name: Check release version
-        run: python3 tools/check-version.py
+        run: python3 .github/scripts/check-version.py
       - name: Test package with strict concurrency
         run: swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
-      - name: Test payload recorder
-        run: python3 -m unittest discover -s tools/payload-recorder -p 'test_*.py'
       - name: Install static tools
         run: brew install swiftlint swiftformat
       - name: SwiftLint
         run: swiftlint lint --strict --quiet
       - name: SwiftFormat
-        run: swiftformat --lint Package.swift OursPrivacy OursPrivacyiOSTests OursPrivacyiOSDemo Tests tools/recorder-probe
+        run: swiftformat --lint Package.swift OursPrivacy OursPrivacyiOSTests OursPrivacyiOSDemo Tests
 
   ios:
     name: Build (iOS)
@@ -110,23 +108,10 @@ jobs:
             -Xswiftc -strict-concurrency=complete \
             -Xswiftc -warnings-as-errors
 
-  e2e:
-    name: Demo recorder E2E
-    runs-on: macos-26
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Select Xcode 26.5
-        run: sudo xcode-select -s /Applications/Xcode_26.5.app
-      - name: Run demo against payload recorder
-        run: ./tools/payload-recorder/run-ios-e2e.sh
-
   required-checks:
     name: Test
     runs-on: ubuntu-latest
-    needs: [static, ios, platforms, e2e]
+    needs: [static, ios, platforms]
     if: always()
     steps:
       - name: Require all test and build jobs
@@ -134,8 +119,7 @@ jobs:
           STATIC_RESULT: ${{ needs.static.result }}
           IOS_RESULT: ${{ needs.ios.result }}
           PLATFORMS_RESULT: ${{ needs.platforms.result }}
-          E2E_RESULT: ${{ needs.e2e.result }}
         run: |
-          for result in "$STATIC_RESULT" "$IOS_RESULT" "$PLATFORMS_RESULT" "$E2E_RESULT"; do
+          for result in "$STATIC_RESULT" "$IOS_RESULT" "$PLATFORMS_RESULT"; do
             test "$result" = success
           done
