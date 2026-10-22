@@ -71,15 +71,15 @@ class Network {
         self.serverURL = serverURL
     }
 
-    class func apiRequest<A: Sendable>(base: String,
-                                       resource: Resource<A>,
-                                       failure: @escaping @Sendable (Reason, Data?, URLResponse?) -> Void,
-                                       success: @escaping @Sendable (A, URLResponse?) -> Void) {
+    class func makeRequestTask<A: Sendable>(base: String,
+                                            resource: Resource<A>,
+                                            failure: @escaping @Sendable (Reason, Data?, URLResponse?) -> Void,
+                                            success: @escaping @Sendable (A, URLResponse?) -> Void) -> URLSessionDataTask? {
         guard let request = buildURLRequest(base, resource: resource) else {
-            return
+            return nil
         }
 
-        URLSession.shared.dataTask(with: request) { (data, response, error) in
+        let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
             guard let httpResponse = response as? HTTPURLResponse else {
 
                 if let hasError = error {
@@ -90,21 +90,19 @@ class Network {
                 return
             }
             OursPrivacyLogger.info(message: "HTTP Response is \(httpResponse)")
-            guard httpResponse.statusCode == 200 else {
+            guard (200 ..< 300).contains(httpResponse.statusCode) else {
                 failure(.notOKStatusCode(statusCode: httpResponse.statusCode), data, response)
                 return
             }
-            guard let responseData = data else {
-                failure(.noData, data, response)
-                return
-            }
+            let responseData = data ?? Data()
             guard let result = resource.parse(responseData) else {
                 failure(.parseError, data, response)
                 return
             }
             OursPrivacyLogger.debug(message: "Network result is \(result)")
             success(result, response)
-        }.resume()
+        }
+        return task
     }
 
     private class func buildURLRequest<A: Sendable>(_ base: String, resource: Resource<A>) -> URLRequest? {

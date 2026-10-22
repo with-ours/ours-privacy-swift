@@ -26,6 +26,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let env = ProcessInfo.processInfo.environment
         let token = env["OURSPRIVACY_TOKEN"] ?? ""
         let serverURL = env["OURSPRIVACY_SERVER_URL"]
+        let initialURL = env["OURSPRIVACY_INITIAL_URL"]
         let optedOutByDefault = env["OURSPRIVACY_OPTED_OUT_BY_DEFAULT"].map { $0 == "1" || $0.lowercased() == "true" }
 
         let op = OursPrivacy(token: token, trackAutomaticEvents: true)
@@ -33,6 +34,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         Task {
             await op.initialize(options: OursPrivacyInitOptions(serverURL: serverURL,
+                                                                initialURL: initialURL,
                                                                 optedOutByDefault: optedOutByDefault))
             op.setLoggingEnabled(true)
             op.flushInterval = 10.0
