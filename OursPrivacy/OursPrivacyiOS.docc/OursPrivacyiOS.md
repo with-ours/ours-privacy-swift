@@ -20,6 +20,47 @@ op.track(event: "Sign Up", properties: ["plan": "pro"])
 
 The full README — including the payload structure, migration notes from 1.x, and a development guide — lives at the repository root.
 
+## Mobile screens and StoreKit
+
+Call ``OursPrivacy/trackScreen(_:)`` from each custom UIKit or SwiftUI navigation transition:
+
+```swift
+op.trackScreen("Schedule")
+```
+
+The public method accepts a fixed, developer-chosen 1–80-character ASCII label matching `^[A-Za-z][A-Za-z0-9 _-]{0,79}$`, with no leading or trailing whitespace. It ignores empty, URL-like, and non-ASCII labels and suppresses a repeated active screen. In the iOS app runtime it emits `$mobile_screen_view` with `eventProperties.screen_name`; a change checkpoints prior-screen `$mobile_session_engagement` with `engagement_duration_ms` and the prior `screen_name` when automatic lifecycle tracking is enabled. On macOS, tvOS, visionOS, watchOS, and iOS apps running on Mac it emits no canonical screen event; ordinary `track(event:)` remains available. Navigation requires explicit calls; re-report the current screen after returning from background.
+
+Map routes to constant labels. Syntax validation cannot distinguish an alphanumeric patient name from a constant label. Never pass patient names, titles, route parameters, or raw URLs; the SDK does not inspect screen content. Manual screens and `track(event:properties:userProperties:)` work with `trackAutomaticEvents: false`. The option defaults to `false` and enables automatic lifecycle, engagement, and update facts when set to `true`. `$mobile_*` names are reserved: manual `track(event:)` calls with that prefix are ignored, including unknown names. Legacy `$ae_*` handling is unchanged.
+
+| Canonical event | When emitted on iOS | `eventProperties` |
+| --- | --- | --- |
+| `$mobile_first_open` | First eligible tracked foreground open for this installation and token, once | SDK metadata |
+| `$mobile_app_open` | Each foreground entry, including cold and warm opens | SDK metadata |
+| `$mobile_session_start` | First tracked foreground entry or foreground replacement after identity change or clock rollback, once per `sid` | SDK metadata |
+| `$mobile_session_engagement` | A positive measured foreground-time delta at a checkpoint, screen change, or pause/background | Required positive integer `engagement_duration_ms` in milliseconds; `screen_name` when a tracked screen is active |
+| `$mobile_session_end` | When a session with a recorded start is replaced by expiry, identity rotation, or clock rollback; timestamp is its last activity, clamped to its start | SDK metadata |
+| `$mobile_app_update` | A later tracked open after the observed app version or build changes, never the first observed open | `previous_app_version` and `previous_app_build` when previously known |
+| `$mobile_screen_view` | A valid explicit `trackScreen` transition; repeated active labels are suppressed | Required `screen_name`; no `screen_class` is collected by the explicit Swift API |
+
+On iOS, canonical facts and manual `track()` and `identify()` events include SDK-owned `defaultProperties.sid`, a 13-digit decimal session-start millisecond string. Common `eventProperties` include `mobile_occurred_at`, `mobile_contract_version: 1`, and `app_version` and `app_build` when available. `mobile_session_started_at` and `mobile_platform` are omitted. Device and SDK `version` metadata remain in defaults. Timestamps are ISO-8601 UTC with exactly three fractional digits and `Z`; occurrence time is no earlier than session start, and session ends use the last active time. Manual events whose property bags leave no room for mobile metadata preserve their ordinary properties and omit that metadata. The SDK does not set top-level `time`.
+
+Foregrounding at or after 30 minutes of inactivity starts a new `sid`; a warm open under 30 minutes keeps it. Manual tracking and valid screen activity renew inactivity even in the background, without measuring background engagement. Engagement uses positive, nonoverlapping monotonic millisecond deltas. Reset and visitor-ID change replace the session and retain queued events with their captured identity; opt-out clears queued events and suppresses manual screens, lifecycle facts, and purchases. Same-time identity rotations advance the session ID by at least one millisecond, including across SDK restarts. A large wall-clock rollback ends the old session and starts a replacement at the new clock time; foreground engagement continues without another app-open event. Upgrades recognize legacy first-open flags or previously persisted visitor/distinct identity before cleanup, even when automatic tracking was off.
+
+Legacy `$ae_first_open`, `$ae_updated`, and `$ae_session` continue for compatibility. Count only `$mobile_*` for Mobile Analytics, or only legacy events for existing reports; combining the streams double-counts activity.
+
+Canonical facts carry only SDK lifecycle metadata and stable screen labels. They have `userProperties: null`, never merge caller default or per-call event/user properties, and collect no patient fields, advertising IDs, or raw URL. Screen labels and manual event properties are developer-controlled, so keep them free of patient data and route parameters. The mobile contract applies to iOS app runtime; on macOS, tvOS, visionOS, watchOS, and iOS apps running on Mac, `trackScreen` emits no canonical fact and ordinary manual events continue without mobile session metadata.
+
+StoreKit collection requires a separate explicit choice, independent of automatic lifecycle tracking:
+
+```swift
+let op = OursPrivacy(token: "YOUR_TOKEN",
+                     trackAutomaticEvents: true,
+                     trackAutomaticPurchases: true)
+await op.initialize()
+```
+
+`trackAutomaticPurchases` defaults to `false` and can also be overridden at boot with `OursPrivacyInitOptions(trackAutomaticPurchases: true)`. A purchased transaction retains the legacy `$ae_iap` event and `eventProperties.$ae_iap_price` (string), `$ae_iap_quantity` (integer), and `$ae_iap_name` (product identifier). Apps migrating from the shared automatic flag must opt in explicitly to keep these product details. ``OursPrivacy/optOutTracking()`` suppresses and clears pending screens, lifecycle events, and purchases.
+
 ## Topics
 
 ### Constructing the SDK
@@ -39,6 +80,7 @@ The full README — including the payload structure, migration notes from 1.x, a
 ### Tracking events
 
 - ``OursPrivacy/track(event:properties:userProperties:)``
+- ``OursPrivacy/trackScreen(_:)``
 - ``OursPrivacy/updateDefaultEventProperties(_:)``
 - ``OursPrivacy/updateDefaultUserCustomProperties(_:)``
 - ``OursPrivacy/updateDefaultUserConsentProperties(_:)``
