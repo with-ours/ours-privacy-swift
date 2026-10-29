@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
   schedule:
     - cron: "0 10 * * *"
   workflow_call:
@@ -18,19 +19,34 @@ concurrency:
 
 jobs:
   static:
-    name: Package tests and static checks
-    runs-on: macos-26
+    name: Package tests and static checks (Xcode ${{ matrix.xcode }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - xcode: "27.1"
+            runner: xcode-27
+          - xcode: "26.5"
+            runner: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Select Xcode 26.5
-        run: sudo xcode-select -s /Applications/Xcode_26.5.app
+      - name: Record toolchain
+        run: |
+          xcodebuild -version
+          swift --version
       - name: Check release version
         run: python3 .github/scripts/check-version.py
       - name: Test package with strict concurrency
-        run: swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
+        run: |
+          SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+          export SDKROOT
+          swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
       - name: Install static tools
         run: brew install swiftlint swiftformat
       - name: SwiftLint
@@ -39,15 +55,30 @@ jobs:
         run: swiftformat --lint Package.swift OursPrivacy OursPrivacyiOSTests OursPrivacyiOSDemo Tests
 
   ios:
-    name: Build (iOS)
-    runs-on: macos-26
+    name: Build (iOS, Xcode ${{ matrix.xcode }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - xcode: "27.1"
+            runner: xcode-27
+            destination: platform=iOS Simulator,name=iPhone Duo,OS=27.1
+          - xcode: "26.5"
+            runner: macos-26
+            destination: platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer
+      IOS_TEST_DESTINATION: ${{ matrix.destination }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Select Xcode 26.5
-        run: sudo xcode-select -s /Applications/Xcode_26.5.app
+      - name: Record toolchain
+        run: |
+          xcodebuild -version
+          swift --version
       - name: SDK release interface build
         run: |
           xcodebuild build \
@@ -62,7 +93,7 @@ jobs:
           xcodebuild test \
             -project OursPrivacy.xcodeproj \
             -scheme OursPrivacy \
-            -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+            -destination "$IOS_TEST_DESTINATION" \
             -parallel-testing-enabled NO \
             CODE_SIGNING_ALLOWED=NO \
             OTHER_SWIFT_FLAGS='-strict-concurrency=complete -warnings-as-errors'
@@ -71,38 +102,67 @@ jobs:
           xcodebuild test \
             -project OursPrivacyiOSDemo/OursPrivacyiOSDemo.xcodeproj \
             -scheme OursPrivacyiOSDemo \
-            -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+            -destination "$IOS_TEST_DESTINATION" \
             -parallel-testing-enabled NO \
             -only-testing:OursPrivacyiOSDemoTests \
             CODE_SIGNING_ALLOWED=NO \
             OTHER_SWIFT_FLAGS='-strict-concurrency=complete'
 
   platforms:
-    name: Build (${{ matrix.platform }})
-    runs-on: macos-26
+    name: Build (${{ matrix.platform }}, Xcode ${{ matrix.xcode }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: tvOS
+            xcode: "27.1"
+            runner: xcode-27
+            triple: arm64-apple-tvos15.0-simulator
+            sdk: appletvsimulator
+          # Xcode 27 supports watchOS 9+, while the 26.5 lane proves watchOS 8.
+          - platform: watchOS
+            xcode: "27.1"
+            runner: xcode-27
+            triple: arm64-apple-watchos9.0-simulator
+            sdk: watchsimulator
+          - platform: macOS
+            xcode: "27.1"
+            runner: xcode-27
+            triple: arm64-apple-macosx12.0
+            sdk: macosx
+          - platform: tvOS
+            xcode: "26.5"
+            runner: macos-26
             triple: arm64-apple-tvos15.0-simulator
             sdk: appletvsimulator
           - platform: watchOS
+            xcode: "26.5"
+            runner: macos-26
             triple: arm64-apple-watchos8.0-simulator
             sdk: watchsimulator
+          - platform: macOS
+            xcode: "26.5"
+            runner: macos-26
+            triple: arm64-apple-macosx12.0
+            sdk: macosx
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Select Xcode 26.5
-        run: sudo xcode-select -s /Applications/Xcode_26.5.app
+      - name: Record toolchain
+        run: |
+          xcodebuild -version
+          swift --version
       - name: Build package with strict concurrency
         env:
           TARGET_TRIPLE: ${{ matrix.triple }}
           APPLE_SDK: ${{ matrix.sdk }}
         run: |
-          swift build --target OursPrivacyKit \
+          swift build --verbose --target OursPrivacyKit \
             --triple "$TARGET_TRIPLE" \
             --sdk "$(xcrun --sdk "$APPLE_SDK" --show-sdk-path)" \
             -Xswiftc -strict-concurrency=complete \

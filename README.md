@@ -39,7 +39,7 @@ Privacy-first analytics for iOS, tvOS, macOS, and watchOS, written in Swift.
 In Xcode: **File → Add Package Dependencies…** and enter `https://github.com/with-ours/ours-privacy-swift`. Or add to `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/with-ours/ours-privacy-swift", from: "3.1.0"),
+.package(url: "https://github.com/with-ours/ours-privacy-swift", from: "3.1.1"),
 ```
 
 Then add `"OursPrivacyKit"` to your target's dependencies.
@@ -664,7 +664,7 @@ The SDK sends a JSON body to `POST /ingest` on the configured `serverURL`. Under
         "os_version": "18.0",
         "device_vendor": "Apple",
         "device_model": "iPhone17,1",
-        "version": "swift@3.1.0"
+        "version": "swift@3.1.1"
       }
     }
   ]
@@ -691,6 +691,8 @@ The SDK sends a JSON body to `POST /ingest` on the configured `serverURL`. Under
 ## Local Demo Tests
 
 Run the package unit tests with `swift test`. The SDK and demo Xcode schemes also include simulator test targets.
+
+CI compiles and tests with stable Xcode 27.1 and retains Xcode 26.5 compatibility checks. Deployment targets remain iOS 15, tvOS 15, macOS 12, and watchOS 8. Since Xcode 27 requires watchOS 9 for builds, the Xcode 26.5 path validates the watchOS 8 floor.
 
 The demo Xcode project resolves the SDK from this checkout. Set `OURSPRIVACY_TOKEN` and `OURSPRIVACY_SERVER_URL` in the demo scheme to try it manually against your own source.
 
