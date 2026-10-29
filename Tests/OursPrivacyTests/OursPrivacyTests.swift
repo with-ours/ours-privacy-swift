@@ -1,7 +1,7 @@
 import XCTest
 @testable import OursPrivacyKit
 
-private final class RecordingFlushRequest: FlushRequest, @unchecked Sendable {
+final class RecordingFlushRequest: FlushRequest, @unchecked Sendable {
     private let lock = NSLock()
     private var bodies: [String] = []
 
@@ -295,7 +295,7 @@ final class OursPrivacyTests: XCTestCase {
         let p = AutomaticProperties.defaultProperties
         XCTAssertNotNil(p["device_vendor"])
         XCTAssertNotNil(p["device_model"])
-        XCTAssertEqual(p["version"] as? String, "swift@3.1.0")
+        XCTAssertEqual(p["version"] as? String, "swift@3.1.1")
         // device_type / os_name / os_version / screen_* depend on the host
         // platform; at minimum the cross-platform anchors must be present.
         // Legacy dollar-prefixed / snake_case keys must be absent.
@@ -795,7 +795,7 @@ final class OursPrivacyTests: XCTestCase {
             XCTAssertEqual(properties?["mobile_contract_version"] as? Int, 1)
             XCTAssertNotNil((properties?["mobile_occurred_at"] as? String)?
                 .range(of: timestampPattern, options: .regularExpression))
-            XCTAssertEqual(defaults?["version"] as? String, "swift@3.1.0")
+            XCTAssertEqual(defaults?["version"] as? String, "swift@3.1.1")
             if let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
                 XCTAssertEqual(properties?["app_version"] as? String, appVersion)
             }

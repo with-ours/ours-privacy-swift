@@ -26,7 +26,7 @@ final class MobilePayloadCompatibilityTests: XCTestCase {
             XCTAssertTrue(properties as NSDictionary == ordinary as NSDictionary)
             XCTAssertEqual(try XCTUnwrap(JSONHandler.encodeAPIData(properties)).utf16.count, 1_048_575)
             XCTAssertEqual((item["defaultProperties"] as? InternalProperties)?["sid"] as? String, "1791194400000")
-            XCTAssertEqual((item["defaultProperties"] as? InternalProperties)?["version"] as? String, "swift@3.1.0")
+            XCTAssertEqual((item["defaultProperties"] as? InternalProperties)?["version"] as? String, "swift@3.1.1")
         }
     }
 
@@ -110,7 +110,7 @@ final class MobilePayloadCompatibilityTests: XCTestCase {
                 "app_version": "2.3", "app_build": "45"
             ]
             var properties: InternalProperties = ordinary
-            var device: InternalProperties = ["sid": "1791194400000", "os_name": "iOS", "version": "swift@3.1.0"]
+            var device: InternalProperties = ["sid": "1791194400000", "os_name": "iOS", "version": "swift@3.1.1"]
             if legacy {
                 device += metadata
                 device["sid"] = "D92E56DC-CFDA-4E5D-B58D-D9F0AB63C74C"
@@ -191,7 +191,7 @@ final class MobilePayloadCompatibilityTests: XCTestCase {
             XCTAssertEqual(item["distinct_id"] as? String, "event-id")
             XCTAssertEqual((item["userProperties"] as? InternalProperties)?["external_id"] as? String, "profile")
             XCTAssertEqual((item["defaultProperties"] as? InternalProperties)?["sid"] as? String, "1791194400000")
-            XCTAssertEqual((item["defaultProperties"] as? InternalProperties)?["version"] as? String, "swift@3.1.0")
+            XCTAssertEqual((item["defaultProperties"] as? InternalProperties)?["version"] as? String, "swift@3.1.1")
         }
     }
 
@@ -212,7 +212,7 @@ final class MobilePayloadCompatibilityTests: XCTestCase {
                     "mobile_occurred_at": "2026-10-05T10:00:01.456Z",
                     "mobile_platform": "ios", "mobile_contract_version": 1,
                     "app_version": "2.3", "app_build": "45",
-                    "os_name": "iOS", "device_vendor": "Apple", "version": "swift@3.1.0", "utm_source": "campaign"
+                    "os_name": "iOS", "device_vendor": "Apple", "version": "swift@3.1.1", "utm_source": "campaign"
                 ]
             ],
             [
@@ -228,7 +228,7 @@ final class MobilePayloadCompatibilityTests: XCTestCase {
             [
                 "id": 9, "op_local_row_id": "row-9", "distinct_id": "event-9", "visitor_id": "desktop-visitor",
                 "event": "Desktop", "eventProperties": NSNull(), "userProperties": NSNull(),
-                "defaultProperties": ["os_name": "macOS", "version": "swift@3.1.0"]
+                "defaultProperties": ["os_name": "macOS", "version": "swift@3.1.1"]
             ]
         ]
         defaults.set(try JSONSerialization.data(withJSONObject: ["events": events, "firstOpenAccepted": true]),
@@ -337,7 +337,7 @@ final class MobilePayloadCompatibilityTests: XCTestCase {
             let defaults = try XCTUnwrap(item["defaultProperties"] as? [String: Any])
             let properties = try XCTUnwrap(item["eventProperties"] as? [String: Any])
             XCTAssertEqual(defaults["sid"] as? String, "1791194400123")
-            XCTAssertEqual(defaults["version"] as? String, "swift@3.1.0")
+            XCTAssertEqual(defaults["version"] as? String, "swift@3.1.1")
             XCTAssertEqual(defaults["device_vendor"] as? String, "Apple")
             XCTAssertEqual(defaults["utm_source"] as? String, "campaign")
             XCTAssertEqual(properties["mobile_contract_version"] as? Int, 1)

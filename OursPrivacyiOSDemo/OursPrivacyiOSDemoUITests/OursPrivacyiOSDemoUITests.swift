@@ -59,6 +59,8 @@ final class OursPrivacyiOSDemoUITests: XCTestCase {
 
         Thread.sleep(forTimeInterval: 1)
         XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10) || app.state == .runningBackgroundSuspended,
+                      "The demo must reach the background before testing a warm open")
         let engagement = try waitForEvent("$mobile_session_engagement", token: token,
                                           recorderURL: recorderURL, screenName: "Schedule")
         let duration = try XCTUnwrap((engagement["eventProperties"] as? [String: Any])?["engagement_duration_ms"] as? Int)
@@ -225,7 +227,7 @@ final class OursPrivacyiOSDemoUITests: XCTestCase {
                 XCTAssertNil(event["op_local_row_id"])
                 XCTAssertNil(event["op_local_identity_mode"])
                 let defaults = try XCTUnwrap(event["defaultProperties"] as? [String: Any])
-                XCTAssertEqual(defaults["version"] as? String, "swift@3.1.0")
+                XCTAssertEqual(defaults["version"] as? String, "swift@3.1.1")
                 XCTAssertEqual(defaults["device_vendor"] as? String, "Apple")
             }
         }

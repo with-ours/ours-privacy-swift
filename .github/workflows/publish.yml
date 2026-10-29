@@ -32,10 +32,12 @@ jobs:
 
   build:
     name: Build & Test
-    runs-on: macos-26
+    runs-on: xcode-27
     needs: ci
     permissions:
       contents: read
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
     outputs:
       version: ${{ steps.version.outputs.version }}
       sha: ${{ steps.version.outputs.sha }}
@@ -44,8 +46,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Select Xcode 26.5
-        run: sudo xcode-select -s /Applications/Xcode_26.5.app
+      - name: Record toolchain
+        run: |
+          xcodebuild -version
+          swift --version
 
       - name: Extract version
         id: version
@@ -71,9 +75,15 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "Building version: $VERSION"
 
-      - run: swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
+      - run: |
+          SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+          export SDKROOT
+          swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
 
-      - run: swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
+      - run: |
+          SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+          export SDKROOT
+          swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
 
   publish:
     name: Publish

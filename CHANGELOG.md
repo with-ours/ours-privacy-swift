@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.1.1
+
+- Fix visitor identity handling after reset while preserving queued events' original identities.
+- Validate SDK builds with Xcode 27.1 while preserving iOS 15, tvOS 15, macOS 12, and watchOS 8 support.
+
 ## 3.1.0
 
 - Add opt-in iOS lifecycle and engagement events, explicit `trackScreen` events, and mobile session metadata; automatic lifecycle tracking remains off by default.

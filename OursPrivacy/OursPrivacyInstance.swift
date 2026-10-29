@@ -156,7 +156,7 @@ open class OursPrivacy: CustomDebugStringConvertible, FlushDelegate, AEDelegate,
     private var identityRevision: UInt64 = 0
     private var consentRevision: UInt64 = 0
 
-    /// True only when the host explicitly called ``setVisitorId(_:)``.
+    /// True after the host calls ``setVisitorId(_:)`` or ``reset(completion:)``.
     /// Forwarded as the top-level `is_manually_set_id` envelope field.
     open internal(set) var isManuallySetId: Bool {
         get {
@@ -945,14 +945,14 @@ extension OursPrivacy {
                 _ = mobileSession.rotate(to: nextVisitorId,
                                          appVersion: AutomaticProperties.appVersion,
                                          appBuild: AutomaticProperties.appBuild,
-                                         isManuallySetId: false, at: point)
+                                         isManuallySetId: true, at: point)
             }
             OursPrivacyPersistence.deleteUserDefaultsData(instanceName: self.name,
                                                            preserveEventQueue: true)
             self.readWriteLock.write {
                 if self.identityRevision == capturedRevision { self.visibleIdentity = nil }
                 self._visitorId = nextVisitorId
-                self._isManuallySetId = false
+                self._isManuallySetId = true
                 self.defaultEventProperties = [:]
                 self.userCustomProperties = [:]
                 self.userConsentProperties = [:]
