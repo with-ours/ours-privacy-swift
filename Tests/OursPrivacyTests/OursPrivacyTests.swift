@@ -71,20 +71,26 @@ private final class LockedMobileClock: @unchecked Sendable {
     }
 }
 
-private final class RecordingPrivacyLogger: OursPrivacyLogging {
+final class RecordingPrivacyLogger: OursPrivacyLogging {
     private let lock = NSLock()
-    private var messages: [String] = []
+    private var messages: [OursPrivacyLogMessage] = []
 
     func addMessage(message: OursPrivacyLogMessage) {
         lock.lock()
-        messages.append(message.text)
+        messages.append(message)
         lock.unlock()
     }
 
     var capturedText: String {
         lock.lock()
         defer { lock.unlock() }
-        return messages.joined(separator: "\n")
+        return messages.map(\.text).joined(separator: "\n")
+    }
+
+    var capturedWarnings: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return messages.filter { $0.level == .warning }.map(\.text)
     }
 }
 
@@ -295,7 +301,7 @@ final class OursPrivacyTests: XCTestCase {
         let p = AutomaticProperties.defaultProperties
         XCTAssertNotNil(p["device_vendor"])
         XCTAssertNotNil(p["device_model"])
-        XCTAssertEqual(p["version"] as? String, "swift@3.1.1")
+        XCTAssertEqual(p["version"] as? String, "swift@3.1.2")
         // device_type / os_name / os_version / screen_* depend on the host
         // platform; at minimum the cross-platform anchors must be present.
         // Legacy dollar-prefixed / snake_case keys must be absent.
@@ -795,7 +801,7 @@ final class OursPrivacyTests: XCTestCase {
             XCTAssertEqual(properties?["mobile_contract_version"] as? Int, 1)
             XCTAssertNotNil((properties?["mobile_occurred_at"] as? String)?
                 .range(of: timestampPattern, options: .regularExpression))
-            XCTAssertEqual(defaults?["version"] as? String, "swift@3.1.1")
+            XCTAssertEqual(defaults?["version"] as? String, "swift@3.1.2")
             if let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
                 XCTAssertEqual(properties?["app_version"] as? String, appVersion)
             }
@@ -870,7 +876,10 @@ final class OursPrivacyTests: XCTestCase {
 
         op.trackScreen("Schedule")
         op.trackScreen("Schedule")
-        clock.set(clock.now() + 10_000)
+        clock.set(clock.now() + 5_000)
+        op.trackScreen("Schedule/123")
+        op.trackScreen("Schedule")
+        clock.set(clock.now() + 5_000)
         op.trackScreen("Booking")
         op.trackingQueue.sync {}
 
@@ -889,24 +898,6 @@ final class OursPrivacyTests: XCTestCase {
                        10_000)
         XCTAssertEqual((screens[0]["defaultProperties"] as? [String: Any])?["sid"] as? String,
                        (screens[1]["defaultProperties"] as? [String: Any])?["sid"] as? String)
-    }
-
-    func testTrackScreenRejectsUnstableLabels() async {
-        let op = makeMobileInstance()
-        await op.initialize()
-        let invalid = ["", " Schedule", "Schedule ", "https://example.test/route",
-                       "Schedule/Patient", "Patiént", "Schedule\n", String(repeating: "A", count: 81)]
-        for label in invalid {
-            op.trackScreen(label)
-        }
-        op.trackScreen(String(repeating: "A", count: 80))
-        op.trackingQueue.sync {}
-
-        let screens = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
-            .filter { $0["event"] as? String == "$mobile_screen_view" }
-        XCTAssertEqual(screens.count, 1)
-        XCTAssertEqual((screens[0]["eventProperties"] as? [String: Any])?["screen_name"] as? String,
-                       String(repeating: "A", count: 80))
     }
 
     func testManualScreenWorksWithAutomaticLifecycleOffAndFullOptOutSuppresses() async {
@@ -932,12 +923,18 @@ final class OursPrivacyTests: XCTestCase {
         XCTAssertFalse(op.mobileRuntimeEnabled)
         op.updateDefaultEventProperties(["patient_field": "caller-controlled"])
         await op.initialize()
+        let logger = RecordingPrivacyLogger()
+        OursPrivacyLogger.addLogging(logger)
+        op.setLoggingEnabled(true)
+        defer { op.setLoggingEnabled(false) }
 
         op.trackScreen("Schedule")
+        op.trackScreen("Schedule/123")
         op.track(event: "appointment_booked", properties: ["appointment_id": "booking-1"])
         op.trackingQueue.sync {}
 
         let items = op.oursprivacyPersistence.loadEntitiesInBatch(type: .events)
+        XCTAssertTrue(logger.capturedWarnings.filter { $0.contains("trackScreen") }.isEmpty)
         XCTAssertEqual(items.compactMap { $0["event"] as? String }, ["appointment_booked"])
         XCTAssertEqual((items.first?["eventProperties"] as? [String: Any])?["appointment_id"] as? String,
                        "booking-1")

@@ -39,7 +39,7 @@ Privacy-first analytics for iOS, tvOS, macOS, and watchOS, written in Swift.
 In Xcode: **File → Add Package Dependencies…** and enter `https://github.com/with-ours/ours-privacy-swift`. Or add to `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/with-ours/ours-privacy-swift", from: "3.1.1"),
+.package(url: "https://github.com/with-ours/ours-privacy-swift", from: "3.1.2"),
 ```
 
 Then add `"OursPrivacyKit"` to your target's dependencies.
@@ -231,7 +231,7 @@ func didShowRoute(_ route: AppRoute) {
 }
 ```
 
-Use fixed developer-chosen labels of 1–80 ASCII characters matching `^[A-Za-z][A-Za-z0-9 _-]{0,79}$`, without leading or trailing whitespace. Empty, URL-like, and non-ASCII strings are ignored. Validation cannot tell a patient name such as `Jane Smith` from a fixed label, so **never** pass patient data, visible titles, route parameters, or raw URLs. Map each route to a fixed label as above. The SDK does not inspect screen content.
+Use fixed developer-chosen labels of 1–80 ASCII characters matching `^[A-Za-z][A-Za-z0-9 _-]{0,79}$`, without leading or trailing whitespace. Invalid labels, including empty, URL-like, and non-ASCII strings, are ignored and logged as warnings when logging is enabled. Validation cannot tell a patient name such as `Jane Smith` from a fixed label, so **never** pass patient data, visible titles, route parameters, or raw URLs. Map each route to a fixed label as above. The SDK does not inspect screen content.
 
 `trackScreen` and manual `track()` work with `trackAutomaticEvents: false`. On iOS, each carries the mobile session metadata below. `trackAutomaticEvents` defaults to `false` and enables automatic lifecycle, engagement, and update facts when set to `true`. `$mobile_*` names are reserved for SDK facts: manual `track(event:)` calls with that prefix are ignored, including unknown names. Legacy `$ae_*` handling is unchanged.
 
@@ -664,7 +664,7 @@ The SDK sends a JSON body to `POST /ingest` on the configured `serverURL`. Under
         "os_version": "18.0",
         "device_vendor": "Apple",
         "device_model": "iPhone17,1",
-        "version": "swift@3.1.1"
+        "version": "swift@3.1.2"
       }
     }
   ]

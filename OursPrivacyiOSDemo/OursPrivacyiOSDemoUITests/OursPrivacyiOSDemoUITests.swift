@@ -227,7 +227,7 @@ final class OursPrivacyiOSDemoUITests: XCTestCase {
                 XCTAssertNil(event["op_local_row_id"])
                 XCTAssertNil(event["op_local_identity_mode"])
                 let defaults = try XCTUnwrap(event["defaultProperties"] as? [String: Any])
-                XCTAssertEqual(defaults["version"] as? String, "swift@3.1.1")
+                XCTAssertEqual(defaults["version"] as? String, "swift@3.1.2")
                 XCTAssertEqual(defaults["device_vendor"] as? String, "Apple")
             }
         }

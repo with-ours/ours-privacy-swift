@@ -1159,7 +1159,13 @@ extension OursPrivacy {
     /// Records an iOS app screen as `$mobile_screen_view`; other runtimes ignore it.
     /// Use fixed labels, never titles, URLs, route parameters, or patient data.
     public func trackScreen(_ name: String) {
-        guard mobileRuntimeEnabled, MobileSession.isValidScreenName(name) else { return }
+        guard mobileRuntimeEnabled else { return }
+        guard MobileSession.isValidScreenName(name) else {
+            OursPrivacyLogger.warn(message: "trackScreen ignored an invalid screen label. "
+                + "Use 1-80 ASCII characters starting with a letter, containing only letters, "
+                + "digits, spaces, underscores, or hyphens, with no trailing whitespace.")
+            return
+        }
         let point = captureMobileTime()
         trackingQueue.async { [weak self] in
             guard let self, !self.hasOptedOutTracking(),
