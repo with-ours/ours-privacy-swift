@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.2
+
+- Log a warning for ignored invalid screen labels when SDK logging is enabled.
+
 ## 3.1.1
 
 - Fix visitor identity handling after reset while preserving queued events' original identities.
