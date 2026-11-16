@@ -100,6 +100,34 @@ extension OursPrivacyTests {
         XCTAssertTrue(recreated.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
     }
 
+    func testResetKeepsOptOutAcrossRecreation() {
+        let token = "reset-opt-out-\(UUID().uuidString)"
+        defer { OursPrivacyPersistence.deleteUserDefaultsData(instanceName: token) }
+        let original = OursPrivacy(token: token, trackAutomaticEvents: false)
+        original.optOutTracking()
+        original.reset()
+        original.trackingQueue.sync {}
+        XCTAssertTrue(original.hasOptedOutTracking())
+        XCTAssertEqual(OursPrivacyPersistence.loadOptOutStatusFlag(instanceName: token), true)
+
+        let recreated = OursPrivacy(token: token, trackAutomaticEvents: false)
+        XCTAssertTrue(recreated.hasOptedOutTracking())
+        recreated.track(event: "after-recreation")
+        recreated.trackingQueue.sync {}
+        XCTAssertTrue(recreated.oursprivacyPersistence.loadEntitiesInBatch(type: .events).isEmpty)
+    }
+
+    func testResetKeepsOptInAcrossRecreation() {
+        let token = "reset-opt-in-\(UUID().uuidString)"
+        defer { OursPrivacyPersistence.deleteUserDefaultsData(instanceName: token) }
+        let original = OursPrivacy(token: token, trackAutomaticEvents: false)
+        original.optOutTracking()
+        original.optInTracking()
+        original.reset()
+        original.trackingQueue.sync {}
+        XCTAssertEqual(OursPrivacyPersistence.loadOptOutStatusFlag(instanceName: token), false)
+    }
+
     func testSetVisitorIdFlipsManuallySetFlag() {
         let op = OursPrivacy(token: "identity-setter-\(UUID().uuidString)", trackAutomaticEvents: false)
         defer { OursPrivacyPersistence.deleteUserDefaultsData(instanceName: op.name) }

@@ -947,8 +947,11 @@ extension OursPrivacy {
                                          appBuild: AutomaticProperties.appBuild,
                                          isManuallySetId: true, at: point)
             }
+            // Reset clears identity, not consent: the stored opt-out or opt-in
+            // decision must survive, as it does on Android, React Native and Flutter.
             OursPrivacyPersistence.deleteUserDefaultsData(instanceName: self.name,
-                                                           preserveEventQueue: true)
+                                                           preserveEventQueue: true,
+                                                           preserveOptOutStatus: true)
             self.readWriteLock.write {
                 if self.identityRevision == capturedRevision { self.visibleIdentity = nil }
                 self._visitorId = nextVisitorId

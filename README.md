@@ -39,7 +39,7 @@ Privacy-first analytics for iOS, tvOS, macOS, and watchOS, written in Swift.
 In Xcode: **File → Add Package Dependencies…** and enter `https://github.com/with-ours/ours-privacy-swift`. Or add to `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/with-ours/ours-privacy-swift", from: "3.1.2"),
+.package(url: "https://github.com/with-ours/ours-privacy-swift", from: "3.1.3"),
 ```
 
 Then add `"OursPrivacyKit"` to your target's dependencies.
@@ -664,7 +664,7 @@ The SDK sends a JSON body to `POST /ingest` on the configured `serverURL`. Under
         "os_version": "18.0",
         "device_vendor": "Apple",
         "device_model": "iPhone17,1",
-        "version": "swift@3.1.2"
+        "version": "swift@3.1.3"
       }
     }
   ]
