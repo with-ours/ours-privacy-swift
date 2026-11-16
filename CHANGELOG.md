@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.3
+
+- Keep the stored opt-out or opt-in decision when `reset()` clears identity.
+
 ## 3.1.2
 
 - Log a warning for ignored invalid screen labels when SDK logging is enabled.

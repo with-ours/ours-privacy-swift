@@ -437,14 +437,18 @@ class OursPrivacyPersistence {
         return OursPrivacyIdentity(visitorId: visitorId, isManuallySetId: isManuallySetId)
     }
 
-    static func deleteUserDefaultsData(instanceName: String, preserveEventQueue: Bool = false) {
+    static func deleteUserDefaultsData(instanceName: String,
+                                       preserveEventQueue: Bool = false,
+                                       preserveOptOutStatus: Bool = false) {
         guard let defaults = UserDefaults(suiteName: OursPrivacyUserDefaultsKeys.suiteName) else {
             return
         }
         let prefix = "\(OursPrivacyUserDefaultsKeys.prefix)-\(instanceName)-"
         defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.visitorId)")
         defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.isManuallySetId)")
-        defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.optOutStatus)")
+        if !preserveOptOutStatus {
+            defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.optOutStatus)")
+        }
         if !preserveEventQueue {
             defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.eventQueue)")
             defaults.removeObject(forKey: "\(prefix)\(OursPrivacyUserDefaultsKeys.privacyClearPending)")
